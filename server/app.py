@@ -70,8 +70,54 @@ ADULT_EXCLUSION_SQL = (
     "AND title NOT LIKE '%(Voovi%' "
     "AND title NOT LIKE '%(Chikooflix%' "
     "AND title NOT LIKE '%(Bigshots%' "
-    "AND title NOT LIKE '%(Atrangii%'"
+    "AND title NOT LIKE '%(Atrangii%' "
+    "AND title NOT LIKE '%(Altbalaji%' "
+    "AND title NOT LIKE '%(Jugnutv%' "
+    "AND title NOT LIKE '%(Rabbit%'"
 )
+
+COMMON_SYNONYMS = {
+    "phela": ["pehla", "phela"],
+    "phel": ["pehl", "phel"],
+    "pyaar": ["pyaar", "pyar"],
+    "pyar": ["pyar", "pyaar"],
+    "squidgame": ["squid game", "squid"],
+    "spiderman": ["spider-man", "spider man"],
+    "ironman": ["iron man", "iron-man"],
+    "batman": ["bat-man", "bat man"],
+    "punkjabi": ["punjabi"],
+    "pujabi": ["punjabi"],
+    "panjabi": ["punjabi"],
+    "bolywood": ["bollywood"],
+    "holywood": ["hollywood"],
+}
+
+
+def _build_search_clause(q_str: str) -> tuple[str, list]:
+    q_str = (q_str or "").strip()
+    if not q_str:
+        return "1=1", []
+    
+    # 1. Exact phrase substring
+    clauses = ["title LIKE ?"]
+    params = [f"%{q_str}%"]
+    
+    # 2. Tokenized words with synonym/transliteration expansion
+    words = [w for w in re.split(r'[\s\-]+', q_str.lower()) if len(w) >= 2]
+    if words:
+        word_clauses = []
+        token_params = []
+        for w in words:
+            syns = COMMON_SYNONYMS.get(w, [w])
+            sub_c = " OR ".join(["title LIKE ?" for _ in syns])
+            word_clauses.append(f"({sub_c})")
+            token_params.extend([f"%{s}%" for s in syns])
+        
+        token_combined = " AND ".join(word_clauses)
+        clauses.append(f"({token_combined})")
+        params.extend(token_params)
+        
+    return f"({' OR '.join(clauses)})", params
 
 
 # ---------------------------------------------------------------- catalogue
@@ -80,24 +126,36 @@ def movies(q: Optional[str] = None, genre: Optional[str] = None,
            year: Optional[str] = None, series: Optional[int] = None,
            sort: str = "recent", page: int = 1, per_page: int = 48):
     w, a = ["title IS NOT NULL AND title != ''", ADULT_EXCLUSION_SQL], []
-    if q:      w.append("title LIKE ?");  a.append(f"%{q}%")
+    q_str = (q or "").strip()
+    if q_str:
+        sq_clause, sq_params = _build_search_clause(q_str)
+        w.append(sq_clause)
+        a.extend(sq_params)
     if genre:
         w.append("(genres LIKE ? OR quality = ? OR title LIKE ?)")
         a.extend([f'%"{genre}"%', genre, f"%{genre}%"])
     if year:   w.append("year = ?");      a.append(year)
     if series is not None: w.append("is_series = ?"); a.append(series)
-    order_map = {
-        "recent": "CAST(year AS INT) DESC, id ASC",
-        "year": "CAST(year AS INT) DESC, id ASC",
-        "imdb": "CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL) DESC, CAST(year AS INT) DESC, id ASC",
-        "title": "title ASC, CAST(year AS INT) DESC"
-    }
-    order = order_map.get(sort, "CAST(year AS INT) DESC, id ASC")
+
+    if q_str:
+        # Prioritize exact prefix, exact substring, then date
+        order = f"CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, CAST(year AS INT) DESC, id ASC"
+        order_params = [f"{q_str}%", f"%{q_str}%"]
+    else:
+        order_map = {
+            "recent": "CAST(year AS INT) DESC, id ASC",
+            "year": "CAST(year AS INT) DESC, id ASC",
+            "imdb": "CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL) DESC, CAST(year AS INT) DESC, id ASC",
+            "title": "title ASC, CAST(year AS INT) DESC"
+        }
+        order = order_map.get(sort, "CAST(year AS INT) DESC, id ASC")
+        order_params = []
+
     sql = "SELECT * FROM movies" + (" WHERE " + " AND ".join(w) if w else "")
     c = db()
     total = c.execute(sql.replace("SELECT *", "SELECT COUNT(*)"), a).fetchone()[0]
     rows = c.execute(sql + f" ORDER BY {order} LIMIT ? OFFSET ?",
-                     a + [per_page, (page - 1) * per_page]).fetchall()
+                     a + order_params + [per_page, (page - 1) * per_page]).fetchall()
     return {"total": total, "page": page, "per_page": per_page,
             "items": [_row(r) for r in rows]}
 
@@ -109,16 +167,22 @@ def search_titles(q: str = "", limit: int = 10):
     if not q_str:
         return {"total": 0, "items": []}
     c = db()
-    term = f"%{q_str}%"
-    total = c.execute(
-        f"SELECT COUNT(*) FROM movies WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL})", (term,)
-    ).fetchone()[0]
+    sq_clause, sq_params = _build_search_clause(q_str)
+    sql_base = f"FROM movies WHERE {sq_clause} AND ({ADULT_EXCLUSION_SQL})"
+    total = c.execute(f"SELECT COUNT(*) {sql_base}", sq_params).fetchone()[0]
+    
+    order_clause = (
+        f"CASE "
+        f"WHEN title LIKE ? THEN 0 "
+        f"WHEN title LIKE ? THEN 1 "
+        f"ELSE 2 END, "
+        f"CAST(year AS INT) DESC, id ASC"
+    )
+    rank_params = sq_params + [f"{q_str}%", f"%{q_str}%", min(limit, 50)]
     rows = c.execute(
-        f"SELECT id, title, year, poster, quality, imdb, is_series FROM movies "
-        f"WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL}) "
-        f"ORDER BY CASE WHEN title LIKE ? THEN 0 ELSE 1 END, "
-        f"CAST(year AS INT) DESC, id ASC LIMIT ?",
-        (term, f"{q_str}%", min(limit, 50))
+        f"SELECT id, title, year, poster, quality, imdb, is_series {sql_base} "
+        f"ORDER BY {order_clause} LIMIT ?",
+        rank_params
     ).fetchall()
     return {"total": total, "items": [dict(r) for r in rows]}
 
