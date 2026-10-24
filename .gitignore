@@ -26,9 +26,12 @@ __pycache__/
 *.py[cod]
 
 # Database
-*.sqlite3
-# Scratch
+*.sqlite3*
+*.db-shm
+*.db-wal
+# Scratch & Debug
 scratch/
+_debug/
 
 
 

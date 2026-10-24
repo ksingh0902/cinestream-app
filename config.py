@@ -13,7 +13,7 @@ STREAM_TTL   = int(os.getenv("STREAM_TTL", "1800"))     # 30 min  (< 6h, R2)
 CRAWL_DELAY  = float(os.getenv("CRAWL_DELAY", "0.6"))
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
 
-DB_PATH = os.getenv("DB_PATH", "yomovies.db")
+DB_PATH = os.getenv("DB_PATH", "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db")
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")

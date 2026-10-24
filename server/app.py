@@ -19,8 +19,11 @@ from scraper.extract import parse_detail, EMBED_RE
 from scraper.http import HttpClient, headers_for
 from scraper.resolve import StreamResolver
 from scraper.store import connect
+from app.api import catalog_router, stream_router
 
 app = FastAPI(title="CineMyMovies API")
+app.include_router(catalog_router)
+app.include_router(stream_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -120,44 +123,6 @@ def _build_search_clause(q_str: str) -> tuple[str, list]:
     return f"({' OR '.join(clauses)})", params
 
 
-# ---------------------------------------------------------------- catalogue
-@app.get("/api/movies")
-def movies(q: Optional[str] = None, genre: Optional[str] = None,
-           year: Optional[str] = None, series: Optional[int] = None,
-           sort: str = "recent", page: int = 1, per_page: int = 48):
-    w, a = ["title IS NOT NULL AND title != ''", ADULT_EXCLUSION_SQL], []
-    q_str = (q or "").strip()
-    if q_str:
-        sq_clause, sq_params = _build_search_clause(q_str)
-        w.append(sq_clause)
-        a.extend(sq_params)
-    if genre:
-        w.append("(genres LIKE ? OR quality = ? OR title LIKE ?)")
-        a.extend([f'%"{genre}"%', genre, f"%{genre}%"])
-    if year:   w.append("year = ?");      a.append(year)
-    if series is not None: w.append("is_series = ?"); a.append(series)
-
-    if q_str:
-        # Prioritize exact prefix, exact substring, then date
-        order = f"CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, CAST(year AS INT) DESC, id ASC"
-        order_params = [f"{q_str}%", f"%{q_str}%"]
-    else:
-        order_map = {
-            "recent": "CAST(year AS INT) DESC, id ASC",
-            "year": "CAST(year AS INT) DESC, id ASC",
-            "imdb": "CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL) DESC, CAST(year AS INT) DESC, id ASC",
-            "title": "title ASC, CAST(year AS INT) DESC"
-        }
-        order = order_map.get(sort, "CAST(year AS INT) DESC, id ASC")
-        order_params = []
-
-    sql = "SELECT * FROM movies" + (" WHERE " + " AND ".join(w) if w else "")
-    c = db()
-    total = c.execute(sql.replace("SELECT *", "SELECT COUNT(*)"), a).fetchone()[0]
-    rows = c.execute(sql + f" ORDER BY {order} LIMIT ? OFFSET ?",
-                     a + order_params + [per_page, (page - 1) * per_page]).fetchall()
-    return {"total": total, "page": page, "per_page": per_page,
-            "items": [_row(r) for r in rows]}
 
 
 @app.get("/api/search")
@@ -176,7 +141,7 @@ def search_titles(q: str = "", limit: int = 10):
         f"WHEN title LIKE ? THEN 0 "
         f"WHEN title LIKE ? THEN 1 "
         f"ELSE 2 END, "
-        f"CAST(year AS INT) DESC, id ASC"
+        f"CAST(year AS INT) DESC, id DESC"
     )
     rank_params = sq_params + [f"{q_str}%", f"%{q_str}%", min(limit, 50)]
     rows = c.execute(
@@ -190,14 +155,6 @@ def search_titles(q: str = "", limit: int = 10):
 @app.get("/api/genres")
 def genres():
     return ["Bollywood", "Hollywood", "Punjabi", "South Special", "Action", "Comedy", "Drama", "Thriller", "Horror", "Romance", "Crime", "Mystery", "Sci-fi", "Animation"]
-
-
-@app.get("/api/movie/{mid}")
-def movie(mid: int):
-    r = db().execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
-    if not r:
-        raise HTTPException(404, "not found")
-    return _row(r)
 
 
 @app.get("/api/stats")
@@ -220,126 +177,6 @@ def health():
             "ttl_seconds": STREAM_TTL, "time": int(time.time())}
 
 
-# ------------------------------------------------------- stream (self-heal)
-def _embeds(row) -> list[dict]:
-    return json.loads(row["embeds"] or "[]")
-
-
-def _is_speedo(e: dict) -> bool:
-    host = (e.get("host") or "").lower()
-    url = (e.get("url") or "").lower()
-    return e.get("type") == "speedo" or "speedo" in host or "/embed-" in url
-
-
-def _embed_payload(mid: int, embed: dict) -> dict:
-    return {
-        "movie_id": mid,
-        "code": embed.get("code", "embed"),
-        "host": embed.get("host", "vidsrc"),
-        "type": "embed",
-        "duration_s": None,
-        "expires_in": STREAM_TTL,
-        "play": embed["url"]
-    }
-
-
-def _payload(mid: int, embed: dict, data: dict) -> dict:
-    return {
-        "movie_id": mid,
-        "code": embed["code"],
-        "host": embed.get("host"),
-        "type": "hls",
-        "duration_s": data.get("duration_s"),
-        "expires_in": STREAM_TTL,
-        "play": "/proxy/hls?u=" + quote(data["hls"], safe="")
-    }
-
-
-@app.get("/api/stream/{mid}")
-async def stream(mid: int, fresh: int = 0):
-    """R1/R2/R3/R4: cached -> live -> re-scrape page -> fallback embed."""
-    r = db().execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
-    if not r:
-        raise HTTPException(404, "not found")
-
-    embeds = _embeds(r)
-
-    # If no embeds in DB, scrape the movie page immediately
-    if not embeds:
-        try:
-            html = _http.get(r["url"], force=True)
-            info = parse_detail(html, r["url"])
-            if info["embeds"]:
-                embeds = info["embeds"]
-                con = db()
-                con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps(embeds), mid))
-                con.commit()
-        except Exception:
-            pass
-
-    # 1. Try Speedostream HLS cache & resolve
-    speedo_list = [e for e in embeds if _is_speedo(e)]
-    if not fresh:
-        for e in speedo_list:
-            if (d := _resolver.cached(e["code"])):
-                return _payload(mid, e, d)
-
-    for e in speedo_list:
-        if (d := _resolver.resolve(e["code"], e.get("url"), force=True)):
-            return _payload(mid, e, d)
-
-    # 2. Try iframe / vidsrc embeds
-    iframe_list = [e for e in embeds if not _is_speedo(e)]
-    for e in iframe_list:
-        if e.get("url"):
-            return _embed_payload(mid, e)
-
-    # 3. If still empty, re-scrape the movie page
-    try:
-        html = _http.get(r["url"], force=True)
-        info = parse_detail(html, r["url"])
-        if info["embeds"]:
-            con = db()
-            con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps(info["embeds"]), mid))
-            con.commit()
-            for e in info["embeds"]:
-                if _is_speedo(e):
-                    if (d := _resolver.resolve(e["code"], e.get("url"), force=True)):
-                        return _payload(mid, e, d)
-                elif e.get("url"):
-                    return _embed_payload(mid, e)
-    except Exception:
-        pass
-
-    # 4. Fallback: Lookup IMDb ID from Cinemeta ONLY for Hollywood/International titles
-    # Vidsrc does not host regional Indian/Punjabi cinema (causes "MEDIA NOT FOUND")
-    genres = (r["genres"] or "").lower()
-    title_lower = (r["title"] or "").lower()
-    is_regional = any(k in genres for k in ["punjabi", "bollywood", "marathi", "bengali", "tamil", "telugu"]) or \
-                  any(k in title_lower for k in ["punjabi", "hindi", "bengali", "marathi", "tamil", "telugu", "season"])
-    if not is_regional:
-        try:
-            clean_title = re.sub(r'\(\d{4}\).*', '', r["title"] or "").strip()
-            query = f"{clean_title} {r['year'] or ''}".strip()
-            c_url = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={quote(query)}.json"
-            cr = await _client.get(c_url, timeout=4)
-            metas = cr.json().get("metas", [])
-            if metas and metas[0].get("id") and str(metas[0]["id"]).startswith("tt"):
-                meta_name = (metas[0].get("name") or "").lower()
-                clean_name = re.sub(r'[^a-z0-9 ]', '', clean_title.lower()).strip()
-                if clean_name and (clean_name in meta_name or meta_name in clean_name):
-                    imdb_id = metas[0]["id"]
-                    fallback_embed = {
-                        "code": imdb_id,
-                        "host": "vidsrc.sh",
-                        "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_id}",
-                        "type": "embed"
-                    }
-                    return _embed_payload(mid, fallback_embed)
-        except Exception:
-            pass
-
-    raise HTTPException(502, "no playable stream")
 
 
 # ------------------------------------------------------------------- proxy
@@ -448,5 +285,7 @@ async def subtitles(mid: int):
                              "Cache-Control": "public, max-age=86400"})
 
 
+app.mount("/web", StaticFiles(directory=str(Path(__file__).parent.parent / "web")),
+          name="web")
 app.mount("/", StaticFiles(directory=str(Path(__file__).parent / "static"),
                            html=True), name="static")

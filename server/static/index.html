@@ -353,6 +353,24 @@ select:focus {
   align-items: center;
   margin-top: auto;
 }
+.card-badges {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 2;
+  pointer-events: none;
+  flex-wrap: wrap;
+  max-width: calc(100% - 14px);
+}
+.card-badges .badge {
+  position: static;
+  top: auto;
+  left: auto;
+  max-width: none;
+}
 .badge {
   position: absolute;
   background: rgba(0,0,0,0.82);
@@ -367,6 +385,31 @@ select:focus {
   pointer-events: none;
   z-index: 2;
 }
+.badge-ask {
+  background: #ea580c !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(234,88,12,0.4) !important;
+}
+.badge-ym {
+  background: #1d4ed8 !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(29,78,216,0.4) !important;
+}
+.badge-dub {
+  background: #059669 !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(5,150,105,0.45) !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  letter-spacing: 0.2px;
+}
+.badge-dub .dub-txt-short { display: none; }
+.badge-dub .dub-txt-full { display: inline; }
 .badge-series {
   position: absolute;
   background: rgba(0,150,255,0.88);
@@ -437,6 +480,16 @@ select:focus {
   .card .m {
     padding: 0 7px 7px;
     font-size: 10px;
+  }
+  .card-badges {
+    top: 6px;
+    left: 6px;
+    gap: 3px;
+  }
+  .card-badges .badge {
+    font-size: 8.5px;
+    padding: 2px 5px;
+    border-radius: 4px;
   }
   .badge {
     top: 6px;
@@ -537,6 +590,18 @@ select:focus {
     padding: 0 5px 5px;
     font-size: 9px;
   }
+  .card-badges {
+    top: 5px;
+    left: 5px;
+    gap: 3px;
+  }
+  .card-badges .badge {
+    font-size: 8px;
+    padding: 1.5px 4.5px;
+    border-radius: 3px;
+  }
+  .badge-dub .dub-txt-short { display: inline; }
+  .badge-dub .dub-txt-full { display: none; }
   .badge {
     top: 5px;
     left: 5px;
@@ -570,10 +635,13 @@ select:focus {
     font-size: 10.5px;
     padding: 0 7px 7px;
   }
+  #grid.cols-2 .card-badges .badge,
   #grid.cols-2 .badge {
     font-size: 9px;
     padding: 2px 6px;
   }
+  #grid.cols-2 .badge-dub .dub-txt-short { display: none; }
+  #grid.cols-2 .badge-dub .dub-txt-full { display: inline; }
 }
 
 /* Breakpoint 4: Ultra-narrow screens (<= 330px) */
@@ -582,6 +650,15 @@ select:focus {
     grid-template-columns: repeat(2, 1fr);
     gap: 6px;
     padding: 6px 6px 20px;
+  }
+  .card-badges {
+    top: 4px;
+    left: 4px;
+    gap: 2px;
+  }
+  .card-badges .badge {
+    font-size: 7.5px;
+    padding: 1px 3.5px;
   }
 }
 
@@ -893,6 +970,11 @@ footer {
   <div class="header-top-row">
     <h1 onclick="goHome()" title="Go to Home (Newly Added)">CineMyMovies</h1>
     <div class="header-controls">
+      <select id="source-filter" title="Filter by source" onchange="activeSource=this.value; page=1; syncFilterPills(document.getElementById('kind').value, activeGenre, this.value); load();">
+        <option value="" selected>🌐 All Sources</option>
+        <option value="yomovies">🎬 ym</option>
+        <option value="ask4movie">🍿 ask</option>
+      </select>
       <select id="sort" title="Sort catalogue">
         <option value="recent" selected>⚡ New</option>
         <option value="year">📅 Year</option>
@@ -920,27 +1002,31 @@ footer {
   </div>
 </header>
 
-<!-- Quick Category / Genre Pill Filter Bar (Horizontally scrollable with touch) -->
+<!-- Quick Category / Genre / Source Pill Filter Bar (Horizontally scrollable with touch) -->
 <nav class="filter-bar" id="filter-bar">
-  <button class="pill active" data-kind="" data-genre="" onclick="setQuickFilter('', '')">✨ All Titles</button>
-  <button class="pill" data-kind="0" data-genre="" onclick="setQuickFilter('0', '')">🎬 Movies</button>
-  <button class="pill" data-kind="1" data-genre="" onclick="setQuickFilter('1', '')">📺 Web Series</button>
+  <button class="pill active" data-kind="" data-genre="" data-source="" onclick="setQuickFilter('', '', '')">✨ All Titles</button>
+  <button class="pill" data-kind="" data-genre="" data-source="ask4movie" onclick="setQuickFilter('', '', 'ask4movie')" style="border-color:#ea580c;color:#fb923c;font-weight:700;">🍿 ask</button>
+  <button class="pill" data-kind="" data-genre="" data-source="yomovies" onclick="setQuickFilter('', '', 'yomovies')" style="border-color:#3b82f6;color:#60a5fa;font-weight:700;">🎬 ym</button>
   <span class="pill-divider"></span>
-  <button class="pill" data-kind="" data-genre="Bollywood" onclick="setQuickFilter('', 'Bollywood')">🍿 Bollywood</button>
-  <button class="pill" data-kind="" data-genre="Hollywood" onclick="setQuickFilter('', 'Hollywood')">🌎 Hollywood</button>
-  <button class="pill" data-kind="" data-genre="Punjabi" onclick="setQuickFilter('', 'Punjabi')">🌾 Punjabi</button>
-  <button class="pill" data-kind="" data-genre="Action" onclick="setQuickFilter('', 'Action')">💥 Action</button>
-  <button class="pill" data-kind="" data-genre="Comedy" onclick="setQuickFilter('', 'Comedy')">😂 Comedy</button>
-  <button class="pill" data-kind="" data-genre="Drama" onclick="setQuickFilter('', 'Drama')">🎭 Drama</button>
-  <button class="pill" data-kind="" data-genre="Thriller" onclick="setQuickFilter('', 'Thriller')">🔍 Thriller</button>
-  <button class="pill" data-kind="" data-genre="Horror" onclick="setQuickFilter('', 'Horror')">😱 Horror</button>
-  <button class="pill" data-kind="" data-genre="Romance" onclick="setQuickFilter('', 'Romance')">❤️ Romance</button>
-  <button class="pill" data-kind="" data-genre="Sci-fi" onclick="setQuickFilter('', 'Sci-fi')">🚀 Sci-Fi</button>
+  <button class="pill" data-kind="" data-genre="Hollywood Dubbed" data-source="" onclick="setQuickFilter('', 'Hollywood Dubbed', '')" style="border-color:#059669;color:#34d399;font-weight:700;">🎙️ Hindi Dubbed</button>
+  <button class="pill" data-kind="0" data-genre="" data-source="" onclick="setQuickFilter('0', '', '')">🎬 Movies</button>
+  <button class="pill" data-kind="1" data-genre="" data-source="" onclick="setQuickFilter('1', '', '')">📺 Web Series</button>
+  <span class="pill-divider"></span>
+  <button class="pill" data-kind="" data-genre="Bollywood" data-source="" onclick="setQuickFilter('', 'Bollywood', '')">🍿 Bollywood</button>
+  <button class="pill" data-kind="" data-genre="Hollywood" data-source="" onclick="setQuickFilter('', 'Hollywood', '')">🌎 Hollywood</button>
+  <button class="pill" data-kind="" data-genre="Punjabi" data-source="" onclick="setQuickFilter('', 'Punjabi', '')">🌾 Punjabi</button>
+  <button class="pill" data-kind="" data-genre="Action" data-source="" onclick="setQuickFilter('', 'Action', '')">💥 Action</button>
+  <button class="pill" data-kind="" data-genre="Comedy" data-source="" onclick="setQuickFilter('', 'Comedy', '')">😂 Comedy</button>
+  <button class="pill" data-kind="" data-genre="Drama" data-source="" onclick="setQuickFilter('', 'Drama', '')">🎭 Drama</button>
+  <button class="pill" data-kind="" data-genre="Thriller" data-source="" onclick="setQuickFilter('', 'Thriller', '')">🔍 Thriller</button>
+  <button class="pill" data-kind="" data-genre="Horror" data-source="" onclick="setQuickFilter('', 'Horror', '')">😱 Horror</button>
+  <button class="pill" data-kind="" data-genre="Romance" data-source="" onclick="setQuickFilter('', 'Romance', '')">❤️ Romance</button>
+  <button class="pill" data-kind="" data-genre="Sci-fi" data-source="" onclick="setQuickFilter('', 'Sci-fi', '')">🚀 Sci-Fi</button>
 </nav>
 
 <div id="grid"></div>
 <div id="pager"></div>
-<footer>CineMyMovies &middot; Personal streaming front-end &middot; Clean catalogue &middot; Not affiliated</footer>
+<footer>cinemymovies stores no media files; it indexes third-party embeds. &middot; Movie information and artwork from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</footer>
 
 <div id="overlay">
   <div class="box">
@@ -955,9 +1041,11 @@ footer {
     </div>
     <div class="player-container" id="player-container">
       <video id="v" controls playsinline crossorigin="anonymous"></video>
-      <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"></iframe>
+      <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="no-referrer"></iframe>
       <div id="player-hud"></div>
     </div>
+    <div id="server-switcher" style="display:none;gap:8px;padding:8px 0;flex-wrap:wrap;"></div>
+    <div id="alt-source-wrap" style="display:none;margin-top:8px;font-size:12.5px;color:var(--dim);"></div>
     <div class="status-wrap">
       <div class="status" id="p-status"></div>
       <div id="retry-wrap" style="display:none">
@@ -1020,7 +1108,7 @@ function toggleDensity(){
 
 applyDensity(mobileCols);
 
-const esc = s => (s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const esc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 
 /* Clicking CineMyMovies title goes to Home page 1, Newly Added */
 function goHome(){
@@ -1028,31 +1116,40 @@ function goHome(){
   closeDropdown();
   page = 1;
   activeGenre = '';
+  activeSource = '';
+  const sf = document.getElementById('source-filter');
+  if(sf) sf.value = '';
   document.getElementById('q').value = '';
   const clr = document.getElementById('q-clear');
   if(clr) clr.style.display = 'none';
   document.getElementById('sort').value = 'recent';
   document.getElementById('kind').value = '';
-  syncFilterPills('', '');
+  syncFilterPills('', '', '');
   window.scrollTo({top: 0, behavior: 'smooth'});
   load();
 }
 
-/* Quick Filter Pills (All, Movies, Series, Bollywood, Hollywood, Action...) */
-function setQuickFilter(kindVal, genreVal){
+let activeSource = '';
+
+/* Quick Filter Pills (All, Ask4Movie, YoMovies, Movies, Series, Bollywood, Hollywood...) */
+function setQuickFilter(kindVal, genreVal, sourceVal = ''){
   closePlayer();
   document.getElementById('kind').value = kindVal;
   activeGenre = genreVal;
+  activeSource = sourceVal;
+  const srcSelect = document.getElementById('source-filter');
+  if(srcSelect) srcSelect.value = sourceVal;
   page = 1;
-  syncFilterPills(kindVal, genreVal);
+  syncFilterPills(kindVal, genreVal, sourceVal);
   load();
 }
 
-function syncFilterPills(kindVal, genreVal){
+function syncFilterPills(kindVal, genreVal, sourceVal = ''){
   document.querySelectorAll('.filter-bar .pill').forEach(btn => {
-    const k = btn.getAttribute('data-kind');
-    const g = btn.getAttribute('data-genre');
-    if (k === kindVal && g === genreVal) {
+    const k = btn.getAttribute('data-kind') || '';
+    const g = btn.getAttribute('data-genre') || '';
+    const s = btn.getAttribute('data-source') || '';
+    if (k === (kindVal || '') && g === (genreVal || '') && s === (sourceVal || '')) {
       btn.classList.add('active');
     } else {
       btn.classList.remove('active');
@@ -1125,6 +1222,8 @@ async function load(){
     per_page: 48,
     sort: document.getElementById('sort').value
   });
+  const src = document.getElementById('source-filter')?.value || activeSource || '';
+  if(src) p.set('source', src);
   const q = document.getElementById('q').value.trim(); if(q) p.set('q',q);
   const k = document.getElementById('kind').value; if(k!=='') p.set('series',k);
   if(activeGenre) p.set('genre', activeGenre);
@@ -1137,14 +1236,26 @@ async function load(){
     const d = await res.json();
     lastTotal = d.total || 0;
     lastPerPage = d.per_page || 48;
+    if(!window.movieCache) window.movieCache = new Map();
+    (d.items || []).forEach(it => window.movieCache.set(it.id, it));
 
     grid.innerHTML = (d.items || []).map(m=>`
       <div class="card" onclick="openPlayer(${m.id})">
-        ${m.quality?`<span class="badge">${esc(m.quality)}</span>`:''}
+        <div class="card-badges">
+          ${m.source==='ask4movie'
+            ? '<span class="badge badge-ask">🍿 ask</span>'
+            : '<span class="badge badge-ym">🎬 ym</span>'}
+          ${m.is_hindi_dubbed
+            ? '<span class="badge badge-dub" title="Hindi Dubbed"><span class="dub-icon">🎙️</span><span class="dub-txt-full"> Hindi Dubbed</span><span class="dub-txt-short"> Hindi</span></span>'
+            : ''}
+        </div>
         ${m.is_series?`<span class="badge-series">Series</span>`:''}
-        <img loading="lazy" src="${esc(m.poster)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22225%22 fill=%22%23222%22><rect width=%22100%%22 height=%22100%%22/></svg>'">
+        <img loading="lazy" src="${esc(m.poster || m.poster_url)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22225%22 fill=%22%23222%22><rect width=%22100%%22 height=%22100%%22/></svg>'">
         <div class="t" title="${esc(m.title)}">${esc(m.title)}</div>
-        <div class="m"><span>${esc(m.year||'')}</span><span>${m.imdb?'★ '+esc(m.imdb):''}</span></div>
+        <div class="m">
+          <span>${esc(m.year||'')}${m.language ? ' · ' + esc(m.language) : ''}</span>
+          <span>${m.imdb ? '★ ' + esc(m.imdb) : (m.rating ? '★ ' + esc(m.rating) : '')}</span>
+        </div>
       </div>`).join('') || '<p style="padding:40px 20px;grid-column:1/-1;text-align:center;color:var(--dim)">No titles found in this category.</p>';
 
     renderPager(lastTotal, lastPerPage, d.page || page);
@@ -1258,12 +1369,20 @@ function toggleCC(){
 async function openPlayer(id){
   curId = id;
   overlay.classList.add('on');
-  document.getElementById('p-title').textContent = 'Loading…';
+  document.getElementById('p-title').innerHTML = '<span class="spinner" style="vertical-align:middle;margin-right:8px"></span> Loading…';
   document.getElementById('p-syn').textContent = '';
+  const altWrap = document.getElementById('alt-source-wrap');
+  if(altWrap) altWrap.style.display = 'none';
   if(retryWrap) retryWrap.style.display = 'none';
+  const srvBox = document.getElementById('server-switcher');
+  if(srvBox){ srvBox.innerHTML = ''; srvBox.style.display = 'none'; }
 
   if(hls){ hls.destroy(); hls = null; }
   video.removeAttribute('src'); video.load();
+  if(pIframe){
+    pIframe.style.display = 'none';
+    pIframe.src = 'about:blank';
+  }
 
   // Clear previous subtitle tracks and attach English track
   while(video.firstChild) video.removeChild(video.firstChild);
@@ -1279,13 +1398,53 @@ async function openPlayer(id){
     if(video.textTracks && video.textTracks[0]) video.textTracks[0].mode = 'showing';
   });
 
-  try {
-    const m = await (await fetch(API_BASE + '/api/movie/' + id)).json();
-    document.getElementById('p-title').textContent = `${m.title} ${m.year?'('+m.year+')':''}`;
-    document.getElementById('p-syn').textContent = m.synopsis || '';
-  } catch(e) {
-    document.getElementById('p-title').textContent = `Movie #${id}`;
-  }
+  const renderMeta = (item) => {
+    if(!item) return;
+    const isAsk = item.source === 'ask4movie';
+    const srcTag = isAsk
+      ? '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#ea580c;color:#fff;vertical-align:middle;">🍿 ask</span>'
+      : '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#1d4ed8;color:#fff;vertical-align:middle;">🎬 ym</span>';
+    const dubTag = item.is_hindi_dubbed
+      ? '<span style="display:inline-block;margin-right:8px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#059669;color:#fff;vertical-align:middle;box-shadow:0 2px 6px rgba(5,150,105,0.4);">🎙️ Hindi Dubbed</span>'
+      : '';
+    const yr = item.year ? ` (${esc(item.year)})` : '';
+    document.getElementById('p-title').innerHTML = `${srcTag} ${dubTag} ${esc(item.title || ('Movie #' + id))}${yr}`;
+    document.getElementById('p-syn').textContent = item.synopsis || '';
+
+    // Notice for upcoming unreleased titles (e.g. 2025, 2026)
+    const isUpcoming = parseInt(item.year, 10) >= 2025;
+    if(altWrap && isUpcoming){
+      altWrap.innerHTML = `<span style="display:inline-block;padding:5px 12px;background:rgba(234,88,12,0.18);border:1px solid rgba(234,88,12,0.4);border-radius:8px;color:#ff9359;font-size:12px;font-weight:600;">ℹ️ Upcoming ${esc(item.year)} release. Stream availability depends on official theatrical/OTT release. Browse released titles (2024 & prior) for instant HD playback.</span>`;
+      altWrap.style.display = 'block';
+    } else if(altWrap && item.also_available_on && item.also_available_on.length > 0){
+      // R14: Cross-source dedupe switcher ("also available on")
+      const altsHtml = item.also_available_on.map(alt => {
+        const altDub = alt.is_hindi_dubbed ? ' (🎙️ Hindi Dubbed)' : '';
+        const altSrc = alt.source === 'ask4movie' ? '🍿 ask' : '🎬 ym';
+        return `<button class="pill" style="display:inline-block;margin-left:6px;padding:3px 10px;font-size:11.5px;background:var(--card);border:1px solid var(--border);color:var(--txt);border-radius:12px;cursor:pointer;" onclick="openPlayer(${alt.id})">Switch to ${altSrc}${altDub}</button>`;
+      }).join('');
+      altWrap.innerHTML = `<span>Also available on:</span> ${altsHtml}`;
+      altWrap.style.display = 'block';
+    }
+  };
+
+  const cachedItem = window.movieCache?.get(id);
+  if(cachedItem) renderMeta(cachedItem);
+
+  fetch((API_BASE || '') + `/api/movie/${id}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(fullItem => {
+      if(fullItem && curId === id){
+        if(!window.movieCache) window.movieCache = new Map();
+        window.movieCache.set(id, fullItem);
+        renderMeta(fullItem);
+      }
+    })
+    .catch(()=>{
+      if(!cachedItem){
+        document.getElementById('p-title').textContent = `Movie #${id}`;
+      }
+    });
 
   const btnCC = document.getElementById('btn-cc');
   if(btnCC) btnCC.textContent = 'CC: English (ON)';
@@ -1325,37 +1484,65 @@ async function fetchStream(id, fresh = false){
 
     const s = await res.json();
     if(mySeq !== currentResolveSeq) return;
-    if(!s.play) throw new Error('No playable stream found.');
+    if(!s.play && !s.url) throw new Error('No playable stream found.');
 
-    const isEmbed = s.type === 'embed' || (!s.play.includes('/proxy/hls') && (s.play.startsWith('http://') || s.play.startsWith('https://')));
+    const playUrl = s.url || s.play;
+    const kind = s.kind || (s.type === 'embed' ? 'iframe' : 'hls');
 
-    if(isEmbed){
-      // External embed player (Vidsrc, Vid-src, etc.)
+    const srvBox = document.getElementById('server-switcher');
+    if(srvBox) srvBox.innerHTML = '';
+
+    if(kind === 'iframe' || s.type === 'embed'){
+      // External embed player (Ask4Movie iframe / Vidsrc)
       if(hls){ hls.destroy(); hls = null; }
       video.pause();
       video.style.display = 'none';
       if(pIframe){
         pIframe.style.display = 'block';
-        pIframe.src = s.play;
+        pIframe.src = playUrl;
       }
       const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
       if(rw) rw.style.display = 'none';
       if(fw) fw.style.display = 'none';
       if(cc) cc.style.display = 'none';
-      statusEl.textContent = `Server ${s.host || 'HD'} · Active stream player`;
+
+      const firstServerLabel = (s.servers && s.servers.length > 0) ? s.servers[0].label : (s.host || 'HD');
+      statusEl.textContent = `${firstServerLabel} · Active stream player ${s.cached ? '(cached)' : ''}`;
+
+      // Server switcher pills
+      if(srvBox && s.servers && s.servers.length > 1){
+        s.servers.forEach((srv, idx) => {
+          const btn = document.createElement('button');
+          const isSelected = srv.url === playUrl || (!playUrl && idx === 0);
+          btn.className = 'pill' + (isSelected ? ' active' : '');
+          btn.textContent = srv.label || `Server ${idx + 1}`;
+          btn.style.cssText = 'padding:4px 12px;font-size:12px;cursor:pointer;';
+          btn.onclick = () => {
+            pIframe.src = srv.url;
+            srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))} · Active stream player`;
+          };
+          srvBox.appendChild(btn);
+        });
+        srvBox.style.display = 'flex';
+      } else if(srvBox) {
+        srvBox.style.display = 'none';
+      }
     } else {
-      // Native HLS player (Speedostream)
+      // Native HLS player (YoMovies / Speedostream)
       if(pIframe){
         pIframe.style.display = 'none';
         pIframe.src = 'about:blank';
       }
+      if(srvBox) srvBox.style.display = 'none';
       video.style.display = 'block';
       const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
       if(rw) rw.style.display = 'inline-flex';
       if(fw) fw.style.display = 'inline-flex';
       if(cc) cc.style.display = 'inline-flex';
-      statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min)`;
-      attach(s.play);
+      statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min) ${s.cached ? '(cached)' : ''}`;
+      attach(playUrl);
     }
   } catch(err) {
     clearTimeout(timeoutId);
@@ -1439,6 +1626,8 @@ function closePlayer(){
     pIframe.style.display = 'none';
     pIframe.src = 'about:blank';
   }
+  const srvBox = document.getElementById('server-switcher');
+  if(srvBox){ srvBox.innerHTML = ''; srvBox.style.display = 'none'; }
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -1558,6 +1747,10 @@ async function renderSearchDropdown(query){
     const res = await fetch(API_BASE + `/api/search?q=${encodeURIComponent(query.trim())}&limit=8`);
     const data = await res.json();
     if(!searchDropdown) return;
+    if(data.items && data.items.length > 0){
+      if(!window.movieCache) window.movieCache = new Map();
+      data.items.forEach(it => window.movieCache.set(it.id, it));
+    }
 
     if(!data.items || data.items.length === 0){
       searchDropdown.innerHTML = `<div class="s-empty">No titles found matching "${esc(query)}".</div>`;
