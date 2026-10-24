@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CineStream - Watch Free Movies & TV Series Online in HD</title>
+  <meta name="description" content="Discover and stream trending Bollywood, Hollywood, and South Indian movies, plus top web series with fast multi-server playback and zero intrusive ads.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <!-- Header / Navigation (S01-S11 common) -->
+  <header class="site-header" id="site-header">
+    <div class="app-container">
+      <div class="nav-wrapper">
+        <!-- Logo -->
+        <a href="#/" class="brand-logo" id="brand-logo" aria-label="CineStream Home">
+          <div class="logo-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+          </div>
+          <span>Cine<span class="accent">Stream</span></span>
+        </a>
+
+        <!-- Category Nav Links -->
+        <ul class="nav-links" id="nav-links">
+          <li class="nav-item"><a href="#/" class="active" data-route="home">Home</a></li>
+          <li class="nav-item"><a href="#/movies" data-route="movies">Movies</a></li>
+          <li class="nav-item"><a href="#/series" data-route="series">TV Series</a></li>
+          <li class="nav-item"><a href="#/trending" data-route="trending">Trending</a></li>
+          <li class="nav-item"><a href="#/genres" data-route="genres">Genres</a></li>
+        </ul>
+
+        <!-- Live Search Bar with Dropdown -->
+        <div class="search-wrapper">
+          <div class="search-input-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="global-search-input" class="search-input" placeholder="Search movies, web series, genres..." autocomplete="off">
+          </div>
+          <div class="search-dropdown" id="search-dropdown">
+            <!-- Populated via live autocomplete -->
+          </div>
+        </div>
+
+        <!-- Action Items (Watchlist & Mobile Menu) -->
+        <div class="nav-actions">
+          <a href="#/watchlist" class="icon-btn" id="watchlist-nav-btn" aria-label="View Watchlist">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="icon-badge" id="watchlist-count">0</span>
+          </a>
+          <button class="icon-btn mobile-menu-btn" id="mobile-menu-toggle" aria-label="Toggle mobile menu">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main View Container -->
+  <main id="app-root" class="app-container" role="main">
+    <!-- Rendered dynamically by js/app.js -->
+  </main>
+
+  <!-- Modal Dialog Root (S08 Broken Link / Trailer) -->
+  <div class="modal-overlay" id="modal-root" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-box" id="modal-content">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div class="toast-container" id="toast-root" aria-live="polite"></div>
+
+  <!-- Footer (S11 Compliance & Links) -->
+  <footer class="site-footer">
+    <div class="app-container">
+      <div class="footer-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4);">
+          <div class="brand-logo">
+            <div class="logo-icon" style="width: 28px; height: 28px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+            </div>
+            <span>Cine<span class="accent">Stream</span></span>
+          </div>
+          <ul class="footer-links">
+            <li><a href="#/">Home</a></li>
+            <li><a href="#/movies">All Movies</a></li>
+            <li><a href="#/series">Web Series</a></li>
+            <li><a href="#/genres">Genre Glossary</a></li>
+            <li><a href="#/dmca">DMCA & Legal Disclaimer</a></li>
+          </ul>
+        </div>
+        <p style="margin-top: var(--space-4); line-height: 1.6;">
+          <strong>Disclaimer:</strong> CineStream is an index and discovery catalogue designed to organize publicly available media metadata. CineStream does not host, upload, or store video files on its servers. All video streams are embedded from open public test platforms or authorized third-party services.
+        </p>
+        <p style="margin-top: var(--space-2); color: rgba(255,255,255,0.3);">
+          &copy; 2026 CineStream Clean-Room Rebuild. All rights reserved.
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/data.js?v=4.0"></script>
+  <script src="js/app.js?v=4.0"></script>
+</body>
+</html>
+

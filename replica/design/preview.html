@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CineStream Design System - Component Primitives</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-sans);
+      font-size: var(--type-base-size);
+      line-height: var(--type-base-line);
+      padding: var(--space-8);
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    header.header {
+      margin-bottom: var(--space-8);
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: var(--space-6);
+    }
+    h1 {
+      font-size: var(--type-display-size);
+      line-height: var(--type-display-line);
+      font-weight: var(--type-display-weight);
+      margin-bottom: var(--space-2);
+      color: var(--color-text);
+    }
+    p.lead {
+      color: var(--color-text-muted);
+      font-size: var(--type-md-size);
+    }
+    .badge-contrast {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      background-color: rgba(74, 222, 128, 0.1);
+      color: var(--color-success);
+      border: 1px solid var(--color-success);
+      padding: var(--space-1) var(--space-3);
+      border-radius: var(--radius-pill);
+      font-size: var(--type-xs-size);
+      font-weight: 600;
+      margin-top: var(--space-3);
+    }
+    section.section {
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-6);
+      margin-bottom: var(--space-8);
+      box-shadow: var(--shadow-card);
+    }
+    h2.section-title {
+      font-size: var(--type-xl-size);
+      font-weight: var(--type-xl-weight);
+      margin-bottom: var(--space-4);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      color: var(--color-text);
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: var(--space-3);
+    }
+    .grid-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-4);
+      align-items: center;
+      margin-bottom: var(--space-4);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      border-radius: var(--radius-md);
+      font-family: var(--font-sans);
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all var(--motion-fast);
+      text-decoration: none;
+    }
+    .btn:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+    .btn:active {
+      transform: scale(0.98);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-sm { height: 32px; padding: 0 var(--space-3); font-size: var(--type-xs-size); }
+    .btn-md { height: 40px; padding: 0 var(--space-4); font-size: var(--type-sm-size); }
+    .btn-lg { height: 48px; padding: 0 var(--space-6); font-size: var(--type-md-size); }
+    .btn-primary { background-color: var(--color-accent); color: var(--color-on-accent); }
+    .btn-primary:hover { filter: brightness(1.1); box-shadow: var(--shadow-glow); }
+    .btn-secondary { background-color: var(--color-surface-hover); color: var(--color-text); border-color: var(--color-border); }
+    .btn-secondary:hover { border-color: var(--color-accent); }
+    .btn-ghost { background: transparent; color: var(--color-text-muted); }
+    .btn-ghost:hover { background: var(--color-surface-hover); color: var(--color-text); }
+    .btn-danger { background-color: rgba(248, 113, 113, 0.15); color: var(--color-danger); border-color: var(--color-danger); }
+    .btn-danger:hover { background-color: var(--color-danger); color: var(--color-on-accent); }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: var(--radius-xs);
+      font-size: var(--type-xs-size);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .badge-quality-4k { background: rgba(56, 189, 248, 0.15); color: var(--color-accent); border: 1px solid rgba(56, 189, 248, 0.4); }
+    .badge-quality-1080p { background: rgba(148, 163, 184, 0.15); color: var(--color-text); border: 1px solid var(--color-border); }
+    .badge-lang-dub { background: rgba(74, 222, 128, 0.15); color: var(--color-success); border: 1px solid rgba(74, 222, 128, 0.3); }
+    .badge-rating { background: rgba(251, 191, 36, 0.15); color: var(--color-warning); border: 1px solid rgba(251, 191, 36, 0.3); }
+
+    /* Inputs */
+    .input-group {
+      position: relative;
+      display: flex;
+      align-items: center;
+      max-width: 380px;
+      width: 100%;
+    }
+    .input {
+      width: 100%;
+      height: 42px;
+      background-color: var(--color-surface);
+      border: 1px solid var(--color-border-input);
+      border-radius: var(--radius-md);
+      color: var(--color-text);
+      padding: 0 var(--space-4);
+      font-size: var(--type-sm-size);
+      outline: none;
+      transition: border-color var(--motion-fast);
+    }
+    .input:focus {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 1px var(--color-accent);
+    }
+    .input::placeholder {
+      color: var(--color-text-muted);
+    }
+
+    /* Server Switcher */
+    .server-switcher {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      background: var(--color-bg);
+      padding: var(--space-2);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+    }
+    .server-tab {
+      padding: var(--space-2) var(--space-4);
+      border-radius: var(--radius-pill);
+      font-size: var(--type-xs-size);
+      font-weight: 600;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: transparent;
+      transition: all var(--motion-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+    .server-tab:hover {
+      color: var(--color-text);
+      background: var(--color-surface-hover);
+    }
+    .server-tab.active {
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      box-shadow: var(--shadow-glow);
+    }
+    .server-tab .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: var(--radius-pill);
+      background: var(--color-success);
+    }
+
+    /* Media Poster Card */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: var(--space-6);
+    }
+    .media-card {
+      position: relative;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      transition: transform var(--motion-base), box-shadow var(--motion-base);
+      cursor: pointer;
+    }
+    .media-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-pop);
+      border-color: var(--color-accent);
+    }
+    .media-poster {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2/3;
+      background: #111622;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .media-poster img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform var(--motion-slow);
+    }
+    .media-card:hover .media-poster img {
+      transform: scale(1.05);
+    }
+    .poster-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(11,15,25,0.9) 100%);
+      opacity: 0;
+      transition: opacity var(--motion-base);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: var(--space-3);
+    }
+    .media-card:hover .poster-overlay {
+      opacity: 1;
+    }
+    .card-badges {
+      position: absolute;
+      top: var(--space-2);
+      left: var(--space-2);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 2;
+    }
+    .card-info {
+      padding: var(--space-3);
+    }
+    .card-title {
+      font-size: var(--type-sm-size);
+      font-weight: 600;
+      color: var(--color-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      color: var(--color-text-muted);
+      font-size: var(--type-xs-size);
+    }
+
+    /* Video Player Mockup */
+    .player-container {
+      position: relative;
+      width: 100%;
+      max-width: 720px;
+      aspect-ratio: 16/9;
+      background: #000;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--shadow-pop);
+      overflow: hidden;
+    }
+    .play-circle {
+      width: 64px;
+      height: 64px;
+      border-radius: var(--radius-pill);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: var(--shadow-glow);
+      transition: transform var(--motion-fast);
+    }
+    .play-circle:hover {
+      transform: scale(1.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>CineStream Design System</h1>
+      <p class="lead">Design tokens, primitive components, and interactive specs for clean-room streaming architecture.</p>
+      <div class="badge-contrast">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        contrast.py verified: 15/15 pairs PASS WCAG 2.2 AA (13 AAA, 0 failures)
+      </div>
+    </header>
+
+    <!-- Buttons Section -->
+    <section class="section">
+      <h2 class="section-title">Button Primitives</h2>
+      <div class="grid-row">
+        <button class="btn btn-primary btn-md">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Watch Now
+        </button>
+        <button class="btn btn-secondary btn-md">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+          Add to Watchlist
+        </button>
+        <button class="btn btn-ghost btn-md">
+          Trailer Modal
+        </button>
+        <button class="btn btn-danger btn-md">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          Report Stream
+        </button>
+      </div>
+      <div class="grid-row">
+        <button class="btn btn-primary btn-sm">Small (32px)</button>
+        <button class="btn btn-primary btn-md">Medium (40px)</button>
+        <button class="btn btn-primary btn-lg">Large (48px)</button>
+        <button class="btn btn-primary btn-md" disabled>Disabled State</button>
+      </div>
+    </section>
+
+    <!-- Badges & Indicators -->
+    <section class="section">
+      <h2 class="section-title">Badges & Metadata Tags</h2>
+      <div class="grid-row">
+        <span class="badge badge-quality-4k">4K Ultra HD</span>
+        <span class="badge badge-quality-1080p">1080p FHD</span>
+        <span class="badge badge-lang-dub">Hindi Dubbed</span>
+        <span class="badge badge-rating">★ 8.8 IMDb</span>
+      </div>
+    </section>
+
+    <!-- Server Switcher & Video Player Mockup -->
+    <section class="section">
+      <h2 class="section-title">Video Server Switcher & Player Container</h2>
+      <div style="margin-bottom: var(--space-4);">
+        <div class="server-switcher">
+          <button class="server-tab active">
+            <span class="dot"></span> Server 1 (Fast VIP)
+          </button>
+          <button class="server-tab">
+            <span class="dot"></span> Server 2 (FHD Backup)
+          </button>
+          <button class="server-tab">
+            <span class="dot"></span> Server 3 (Multi-Audio)
+          </button>
+          <button class="server-tab">
+            <span class="dot"></span> Server 4 (Streamtape)
+          </button>
+        </div>
+      </div>
+      <div class="player-container">
+        <div class="play-circle">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        </div>
+        <p style="margin-top: var(--space-3); color: var(--color-text-muted); font-size: var(--type-sm-size);">
+          Protected Sandbox: <code>allow-scripts allow-same-origin</code> (Ad-blocking active)
+        </p>
+      </div>
+    </section>
+
+    <!-- Media Cards Grid -->
+    <section class="section">
+      <h2 class="section-title">Media Poster Cards (Hover to preview overlay)</h2>
+      <div class="cards-grid">
+        <div class="media-card">
+          <div class="media-poster">
+            <div class="card-badges">
+              <span class="badge badge-quality-4k">4K</span>
+              <span class="badge badge-lang-dub">Hindi</span>
+            </div>
+            <div class="poster-overlay">
+              <span class="badge badge-rating">★ 8.4</span>
+              <button class="btn btn-primary btn-sm" style="width: 100%;">Stream Now</button>
+            </div>
+            <div style="color: var(--color-text-muted); font-size: var(--type-xs-size); text-align: center;">
+              🎬 Poster Demo 1
+            </div>
+          </div>
+          <div class="card-info">
+            <div class="card-title">Interstellar (2014)</div>
+            <div class="card-meta">
+              <span>Sci-Fi / Drama</span>
+              <span>169 min</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="media-card">
+          <div class="media-poster">
+            <div class="card-badges">
+              <span class="badge badge-quality-1080p">1080p</span>
+              <span class="badge badge-lang-dub">Dual Audio</span>
+            </div>
+            <div class="poster-overlay">
+              <span class="badge badge-rating">★ 9.0</span>
+              <button class="btn btn-primary btn-sm" style="width: 100%;">Stream Now</button>
+            </div>
+            <div style="color: var(--color-text-muted); font-size: var(--type-xs-size); text-align: center;">
+              🎬 Poster Demo 2
+            </div>
+          </div>
+          <div class="card-info">
+            <div class="card-title">The Dark Knight</div>
+            <div class="card-meta">
+              <span>Action / Crime</span>
+              <span>152 min</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="media-card">
+          <div class="media-poster">
+            <div class="card-badges">
+              <span class="badge badge-quality-1080p">1080p</span>
+              <span class="badge badge-quality-4k">Season 2</span>
+            </div>
+            <div class="poster-overlay">
+              <span class="badge badge-rating">★ 8.7</span>
+              <button class="btn btn-primary btn-sm" style="width: 100%;">Episodes</button>
+            </div>
+            <div style="color: var(--color-text-muted); font-size: var(--type-xs-size); text-align: center;">
+              📺 Series Demo
+            </div>
+          </div>
+          <div class="card-info">
+            <div class="card-title">Stranger Things</div>
+            <div class="card-meta">
+              <span>TV Series</span>
+              <span>Ep 1-8</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // Interactive tab switching
+    document.querySelectorAll('.server-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.server-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

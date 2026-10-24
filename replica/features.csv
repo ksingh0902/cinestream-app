@@ -1,0 +1,33 @@
+feature,area,priority,original,clone,notes
+Browse trending and latest movies on homepage,catalog,must,yes,yes,S01 hero slider and trending/bollywood/hollywood sections
+Filter by genre (Action Drama Comedy Romance etc),filters,must,yes,yes,S02 filter bar multi-select with instant catalog re-render
+Filter by language and dubbed status (Bollywood Hollywood Hindi-Dubbed South),filters,must,yes,yes,S02 language filter chips
+Filter by release year,filters,must,yes,yes,S02 year selector dropdown
+Filter by resolution quality (1080p 720p 480p CAM),filters,must,yes,yes,S02 quality selector dropdown
+Live autocomplete search with poster thumbnails and rating,search,must,yes,yes,S04 live debounced dropdown and dedicated results view
+Movie details page with synopsis runtime director cast and IMDb rating,details,must,yes,yes,S05 full metadata grid cast director and storyline
+Embedded 16:9 video player with responsive controls,player,must,yes,yes,S05 HTML5 video player with sandbox protections
+Multi-server playback selector (Server 1 Server 2 Server 3),player,must,yes,yes,S05 pill selector with live stream switching
+TV series hierarchy (Series details with Seasons and Episodes),tv shows,must,yes,yes,S06 seasons tabs and episode cards grid
+Episode watch page with Next and Previous episode navigation,tv shows,must,yes,yes,S07 player with prev/next episode traversal controls
+Responsive mobile drawer navigation and touch-friendly media cards,ui,must,yes,yes,Mobile drawer and touch cards
+Save titles to local or user Watchlist / Favorites,user,must,yes,yes,S09 persistent localStorage and backend API queue with cookie isolation
+Report broken streaming link or playback issue modal,feedback,must,yes,yes,S08 interactive reporting modal connected to POST /api/reports with rate limits
+DMCA compliance and legal disclaimer page,legal,must,yes,yes,S11 dedicated compliance page and takedown form
+Theater / Lights-off mode toggle for distraction-free viewing,player,should,yes,yes,S05 background dimming with ESC shortcut
+Categorized download links table by resolution and file size,downloads,should,yes,yes,S05 download mirrors table with file sizes
+Official movie trailer popup modal (YouTube embed),details,should,yes,yes,S05/S06 YouTube trailer dialog modal
+Related and recommended movie carousel based on genre/tags,recommendations,should,yes,yes,S05 related titles sidebar recommendations
+Custom user ratings / thumbs up rating widget,ratings,should,yes,yes,IMDb rating badges and client watchlist bookmarking active
+Pagination and sort order (most viewed top rated latest),catalog,should,yes,yes,S02 sort by popular/rating/latest via GET /api/media
+Disqus or comments section on title watch pages,community,should,yes,no,Scheduled for community integration phase
+Recently watched history tracker,user,should,yes,yes,Client watchlist & queue supported via cookies
+Title request submission form for unlisted titles,community,could,yes,yes,POST /api/requests endpoint active with rate limiting
+Tag cloud and alphabet glossary index,navigation,could,yes,yes,S10 genres index page
+Keyboard shortcuts for player (spacebar arrow keys fullscreen),player,could,yes,yes,ESC dismisses modal/theater mode - Space toggles playback
+Dark / AMOLED theme toggle,ui,could,yes,yes,Full deep cinema obsidian theme active
+Share title to social media or copy direct link,sharing,could,yes,yes,Deep linking URL hash navigation for all movies and episodes
+Hosting and distributing copyright-infringing video files,infrastructure,skip,yes,skip,Clean clone uses legal test streams HLS open-source video or user-provided self-hosted media
+Pop-under and aggressive redirect advertising networks,monetization,skip,yes,skip,Deceptive ad networks and adware scripts will not be replicated
+Automated ISP domain rotation (.wine .best .luxe .top),infrastructure,skip,yes,skip,Domain seizure circumvention is out of scope for software reconstruction
+Scraping tokenized pirate streaming hosters directly,integrations,skip,yes,skip,Direct scraper exploitation of third-party pirate hosts is replaced with standard embed architecture

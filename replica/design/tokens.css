@@ -1,0 +1,91 @@
+/**
+ * tokens.css: CineStream Design System CSS Custom Properties
+ * Generated from replica/design/tokens.json
+ * Contrast verified with contrast.py (WCAG 2.2 AA/AAA)
+ */
+
+:root {
+  /* Colors */
+  --color-bg: #0b0f19;
+  --color-surface: #151c2c;
+  --color-surface-hover: #1e293b;
+  --color-border: #283548;
+  --color-border-input: #64748b;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-accent: #38bdf8;
+  --color-on-accent: #080d1a;
+  --color-danger: #f87171;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --type-xs-size: 12px;
+  --type-xs-line: 16px;
+  --type-xs-weight: 500;
+
+  --type-sm-size: 14px;
+  --type-sm-line: 20px;
+  --type-sm-weight: 400;
+
+  --type-base-size: 16px;
+  --type-base-line: 24px;
+  --type-base-weight: 400;
+
+  --type-md-size: 18px;
+  --type-md-line: 26px;
+  --type-md-weight: 600;
+
+  --type-lg-size: 20px;
+  --type-lg-line: 28px;
+  --type-lg-weight: 600;
+
+  --type-xl-size: 24px;
+  --type-xl-line: 32px;
+  --type-xl-weight: 700;
+
+  --type-2xl-size: 30px;
+  --type-2xl-line: 38px;
+  --type-2xl-weight: 700;
+
+  --type-display-size: 42px;
+  --type-display-line: 48px;
+  --type-display-weight: 800;
+
+  /* Spacing */
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* Border Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 9999px;
+
+  /* Shadows & Glows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 4px 12px 0 rgba(0, 0, 0, 0.5), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 16px 36px -4px rgba(0, 0, 0, 0.7), 0 6px 16px -4px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 24px -2px rgba(56, 189, 248, 0.35);
+
+  /* Transitions & Motion */
+  --motion-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-slow: 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
