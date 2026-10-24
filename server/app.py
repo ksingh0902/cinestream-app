@@ -161,49 +161,115 @@ def _embeds(row) -> list[dict]:
     return json.loads(row["embeds"] or "[]")
 
 
+def _is_speedo(e: dict) -> bool:
+    host = (e.get("host") or "").lower()
+    url = (e.get("url") or "").lower()
+    return e.get("type") == "speedo" or "speedo" in host or "/embed-" in url
+
+
+def _embed_payload(mid: int, embed: dict) -> dict:
+    return {
+        "movie_id": mid,
+        "code": embed.get("code", "embed"),
+        "host": embed.get("host", "vidsrc"),
+        "type": "embed",
+        "duration_s": None,
+        "expires_in": STREAM_TTL,
+        "play": embed["url"]
+    }
+
+
+def _payload(mid: int, embed: dict, data: dict) -> dict:
+    return {
+        "movie_id": mid,
+        "code": embed["code"],
+        "host": embed.get("host"),
+        "type": "hls",
+        "duration_s": data.get("duration_s"),
+        "expires_in": STREAM_TTL,
+        "play": "/proxy/hls?u=" + quote(data["hls"], safe="")
+    }
+
+
 @app.get("/api/stream/{mid}")
-def stream(mid: int, fresh: int = 0):
-    """R1/R2/R3: cached -> live -> re-scrape page -> failover."""
+async def stream(mid: int, fresh: int = 0):
+    """R1/R2/R3/R4: cached -> live -> re-scrape page -> fallback embed."""
     r = db().execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
     if not r:
         raise HTTPException(404, "not found")
 
     embeds = _embeds(r)
 
-    # 1. warm cache
+    # If no embeds in DB, scrape the movie page immediately
+    if not embeds:
+        try:
+            html = _http.get(r["url"], force=True)
+            info = parse_detail(html, r["url"])
+            if info["embeds"]:
+                embeds = info["embeds"]
+                con = db()
+                con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps(embeds), mid))
+                con.commit()
+        except Exception:
+            pass
+
+    # 1. Try Speedostream HLS cache & resolve
+    speedo_list = [e for e in embeds if _is_speedo(e)]
     if not fresh:
-        for e in embeds:
+        for e in speedo_list:
             if (d := _resolver.cached(e["code"])):
                 return _payload(mid, e, d)
 
-    # 2. live resolve, trying every known embed
-    for e in embeds:
+    for e in speedo_list:
         if (d := _resolver.resolve(e["code"], e.get("url"), force=True)):
             return _payload(mid, e, d)
 
-    # 3. embeds stale -> re-scrape the movie page to rediscover current hosts
+    # 2. Try iframe / vidsrc embeds
+    iframe_list = [e for e in embeds if not _is_speedo(e)]
+    for e in iframe_list:
+        if e.get("url"):
+            return _embed_payload(mid, e)
+
+    # 3. If still empty, re-scrape the movie page
     try:
         html = _http.get(r["url"], force=True)
         info = parse_detail(html, r["url"])
         if info["embeds"]:
-            from scraper.store import upsert
             con = db()
-            info.update({k: r[k] for k in ("title", "year") if r[k]})
-            upsert(con, info)
+            con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps(info["embeds"]), mid))
+            con.commit()
             for e in info["embeds"]:
-                if (d := _resolver.resolve(e["code"], e["url"], force=True)):
-                    return _payload(mid, e, d)
+                if _is_speedo(e):
+                    if (d := _resolver.resolve(e["code"], e.get("url"), force=True)):
+                        return _payload(mid, e, d)
+                elif e.get("url"):
+                    return _embed_payload(mid, e)
+    except Exception:
+        pass
+
+    # 4. Fallback: Lookup IMDb ID from Cinemeta and provide vidsrc stream
+    try:
+        clean_title = re.sub(r'\(\d{4}\).*', '', r["title"] or "").strip()
+        query = f"{clean_title} {r['year'] or ''}".strip()
+        c_url = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={quote(query)}.json"
+        cr = await _client.get(c_url, timeout=4)
+        metas = cr.json().get("metas", [])
+        if metas and metas[0].get("id"):
+            imdb_id = metas[0]["id"]
+            fallback_embed = {
+                "code": imdb_id,
+                "host": "vidsrc.sh",
+                "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_id}",
+                "type": "embed"
+            }
+            con = db()
+            con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps([fallback_embed]), mid))
+            con.commit()
+            return _embed_payload(mid, fallback_embed)
     except Exception:
         pass
 
     raise HTTPException(502, "no playable stream")
-
-
-def _payload(mid: int, embed: dict, data: dict) -> dict:
-    return {"movie_id": mid, "code": embed["code"], "host": embed.get("host"),
-            "duration_s": data.get("duration_s"),
-            "expires_in": STREAM_TTL,
-            "play": "/proxy/hls?u=" + quote(data["hls"], safe="")}
 
 
 # ------------------------------------------------------------------- proxy

@@ -82,14 +82,46 @@ def parse_detail(html: str, url: str) -> Dict:
         elif key.startswith("quality"):        info["quality"] = val
         elif key.startswith("imdb"):           info["imdb"] = val
 
-    # R3: absolute embed URLs discovered anywhere on the page
+    # R3: absolute embed URLs (Speedostream + Vidsrc / player iframes)
     seen = set()
     for m in EMBED_RE.finditer(html):
         host, code = m.group(1), m.group(2)
         if code in seen:
             continue
         seen.add(code)
-        info["embeds"].append({"code": code, "host": host, "url": m.group(0)})
+        info["embeds"].append({"code": code, "host": host, "url": m.group(0), "type": "speedo"})
+
+    for ifr in soup.select("#content-embed iframe, .movieplay iframe, #player2 iframe, iframe"):
+        src = (ifr.get("src") or ifr.get("data-src") or "").strip()
+        if not src or "youtube.com" in src or "youtu.be" in src:
+            continue
+        if src.startswith("//"):
+            src = "https:" + src
+        m_speedo = EMBED_RE.search(src)
+        if m_speedo:
+            code = m_speedo.group(2)
+            if code not in seen:
+                seen.add(code)
+                info["embeds"].append({"code": code, "host": m_speedo.group(1), "url": src, "type": "speedo"})
+            continue
+        if src in seen:
+            continue
+        seen.add(src)
+        host = src.split("/")[2] if "://" in src else "vidsrc"
+        m_imdb = re.search(r'(?:imdb=|/)(tt\d+)', src)
+        code = m_imdb.group(1) if m_imdb else "embed"
+        info["embeds"].append({"code": code, "host": host, "url": src, "type": "embed"})
+
+    # Fallback to IMDb ID if present in page text/meta
+    m_page_imdb = re.search(r'tt\d{6,}', html)
+    if m_page_imdb and not any(e.get("code", "").startswith("tt") for e in info["embeds"]):
+        imdb_code = m_page_imdb.group(0)
+        info["embeds"].append({
+            "code": imdb_code,
+            "host": "vidsrc.sh",
+            "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_code}",
+            "type": "embed"
+        })
 
     for a in soup.select("#list-dl a.lnk-lnk"):
         info["downloads"].append({

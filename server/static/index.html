@@ -955,6 +955,7 @@ footer {
     </div>
     <div class="player-container" id="player-container">
       <video id="v" controls playsinline crossorigin="anonymous"></video>
+      <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"></iframe>
       <div id="player-hud"></div>
     </div>
     <div class="status-wrap">
@@ -973,6 +974,7 @@ const overlay = document.getElementById('overlay'), video = document.getElementB
 const statusEl = document.getElementById('p-status'), hudEl = document.getElementById('player-hud');
 const retryWrap = document.getElementById('retry-wrap');
 const playerContainer = document.getElementById('player-container');
+const pIframe = document.getElementById('p-iframe');
 
 let page = 1, totalPages = 1, hls = null, curId = null, refreshing = false, keepTime = 0;
 let skipAccumulator = 0, skipResetTimer = null, hudTimer = null, stallCheckTimer = null;
@@ -1325,8 +1327,36 @@ async function fetchStream(id, fresh = false){
     if(mySeq !== currentResolveSeq) return;
     if(!s.play) throw new Error('No playable stream found.');
 
-    statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round(s.expires_in/60)} min)`;
-    attach(s.play);
+    const isEmbed = s.type === 'embed' || (!s.play.includes('/proxy/hls') && (s.play.startsWith('http://') || s.play.startsWith('https://')));
+
+    if(isEmbed){
+      // External embed player (Vidsrc, Vid-src, etc.)
+      if(hls){ hls.destroy(); hls = null; }
+      video.pause();
+      video.style.display = 'none';
+      if(pIframe){
+        pIframe.style.display = 'block';
+        pIframe.src = s.play;
+      }
+      const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
+      if(rw) rw.style.display = 'none';
+      if(fw) fw.style.display = 'none';
+      if(cc) cc.style.display = 'none';
+      statusEl.textContent = `Server ${s.host || 'HD'} · Active stream player`;
+    } else {
+      // Native HLS player (Speedostream)
+      if(pIframe){
+        pIframe.style.display = 'none';
+        pIframe.src = 'about:blank';
+      }
+      video.style.display = 'block';
+      const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
+      if(rw) rw.style.display = 'inline-flex';
+      if(fw) fw.style.display = 'inline-flex';
+      if(cc) cc.style.display = 'inline-flex';
+      statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min)`;
+      attach(s.play);
+    }
   } catch(err) {
     clearTimeout(timeoutId);
     if(err.name === 'AbortError') return;
@@ -1405,9 +1435,18 @@ function closePlayer(){
     currentStreamAbort = null;
   }
   if(hls){ hls.destroy(); hls = null; }
+  if(pIframe){
+    pIframe.style.display = 'none';
+    pIframe.src = 'about:blank';
+  }
   video.pause();
   video.removeAttribute('src');
   video.load();
+  video.style.display = 'block';
+  const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
+  if(rw) rw.style.display = 'inline-flex';
+  if(fw) fw.style.display = 'inline-flex';
+  if(cc) cc.style.display = 'inline-flex';
   curId = null;
   statusEl.innerHTML = '';
   if(retryWrap) retryWrap.style.display = 'none';
