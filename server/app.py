@@ -247,27 +247,33 @@ async def stream(mid: int, fresh: int = 0):
     except Exception:
         pass
 
-    # 4. Fallback: Lookup IMDb ID from Cinemeta and provide vidsrc stream
-    try:
-        clean_title = re.sub(r'\(\d{4}\).*', '', r["title"] or "").strip()
-        query = f"{clean_title} {r['year'] or ''}".strip()
-        c_url = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={quote(query)}.json"
-        cr = await _client.get(c_url, timeout=4)
-        metas = cr.json().get("metas", [])
-        if metas and metas[0].get("id"):
-            imdb_id = metas[0]["id"]
-            fallback_embed = {
-                "code": imdb_id,
-                "host": "vidsrc.sh",
-                "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_id}",
-                "type": "embed"
-            }
-            con = db()
-            con.execute("UPDATE movies SET embeds=? WHERE id=?", (json.dumps([fallback_embed]), mid))
-            con.commit()
-            return _embed_payload(mid, fallback_embed)
-    except Exception:
-        pass
+    # 4. Fallback: Lookup IMDb ID from Cinemeta ONLY for Hollywood/International titles
+    # Vidsrc does not host regional Indian/Punjabi cinema (causes "MEDIA NOT FOUND")
+    genres = (r["genres"] or "").lower()
+    title_lower = (r["title"] or "").lower()
+    is_regional = any(k in genres for k in ["punjabi", "bollywood", "marathi", "bengali", "tamil", "telugu"]) or \
+                  any(k in title_lower for k in ["punjabi", "hindi", "bengali", "marathi", "tamil", "telugu", "season"])
+    if not is_regional:
+        try:
+            clean_title = re.sub(r'\(\d{4}\).*', '', r["title"] or "").strip()
+            query = f"{clean_title} {r['year'] or ''}".strip()
+            c_url = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={quote(query)}.json"
+            cr = await _client.get(c_url, timeout=4)
+            metas = cr.json().get("metas", [])
+            if metas and metas[0].get("id") and str(metas[0]["id"]).startswith("tt"):
+                meta_name = (metas[0].get("name") or "").lower()
+                clean_name = re.sub(r'[^a-z0-9 ]', '', clean_title.lower()).strip()
+                if clean_name and (clean_name in meta_name or meta_name in clean_name):
+                    imdb_id = metas[0]["id"]
+                    fallback_embed = {
+                        "code": imdb_id,
+                        "host": "vidsrc.sh",
+                        "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_id}",
+                        "type": "embed"
+                    }
+                    return _embed_payload(mid, fallback_embed)
+        except Exception:
+            pass
 
     raise HTTPException(502, "no playable stream")
 

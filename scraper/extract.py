@@ -95,6 +95,9 @@ def parse_detail(html: str, url: str) -> Dict:
         src = (ifr.get("src") or ifr.get("data-src") or "").strip()
         if not src or "youtube.com" in src or "youtu.be" in src:
             continue
+        bad_domains = ["twitter.com", "x.com", "facebook.com", "instagram.com", "disqus.com", "histats.com", "doubleclick", "googletag"]
+        if any(b in src.lower() for b in bad_domains):
+            continue
         if src.startswith("//"):
             src = "https:" + src
         m_speedo = EMBED_RE.search(src)
