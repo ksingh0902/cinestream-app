@@ -980,6 +980,22 @@ let currentStreamAbort = null, currentResolveSeq = 0;
 let activeGenre = '';
 let lastTotal = 0, lastPerPage = 48;
 
+/* Configurable Backend API Endpoint (Supports static CDN hosts like Netlify/Vercel) */
+const API_BASE = (window.API_BASE || localStorage.getItem('cm_api_base') || '').replace(/\/+$/, '');
+
+function saveApiBase(){
+  const inp = document.getElementById('api-base-input');
+  if(!inp) return;
+  const val = inp.value.trim().replace(/\/+$/, '');
+  if(!val){
+    localStorage.removeItem('cm_api_base');
+  } else {
+    localStorage.setItem('cm_api_base', val);
+  }
+  window.location.reload();
+}
+window.saveApiBase = saveApiBase;
+
 /* Mobile Column Density Mode (3 compact cards default, 2 cards option) */
 let mobileCols = localStorage.getItem('cm_mobile_cols') || '3';
 
@@ -1112,7 +1128,10 @@ async function load(){
   if(activeGenre) p.set('genre', activeGenre);
 
   try {
-    const res = await fetch('/api/movies?' + p);
+    const res = await fetch(API_BASE + '/api/movies?' + p);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
     const d = await res.json();
     lastTotal = d.total || 0;
     lastPerPage = d.per_page || 48;
@@ -1128,7 +1147,21 @@ async function load(){
 
     renderPager(lastTotal, lastPerPage, d.page || page);
   } catch(e) {
-    grid.innerHTML = `<p style="padding:40px 20px;grid-column:1/-1;text-align:center;color:#ff8888">Failed to load titles. Please check connection.</p>`;
+    const isStaticDeploy = window.location.hostname.includes('netlify.app') || window.location.hostname.includes('vercel.app') || window.location.hostname.includes('github.io');
+    grid.innerHTML = `
+      <div style="padding:40px 16px;grid-column:1/-1;text-align:center;max-width:560px;margin:auto">
+        <div style="font-size:36px;margin-bottom:12px">📡</div>
+        <h3 style="color:#ff8888;margin:0 0 10px;font-size:18px">Backend API Not Connected</h3>
+        <p style="color:var(--dim);font-size:13px;line-height:1.55;margin-bottom:18px">
+          ${isStaticDeploy ? 
+            '<strong>Netlify is a static CDN</strong> and cannot run Python/FastAPI servers, SQLite, or the video proxy.<br><br>Deploy this repository on <strong>Render.com</strong> or <strong>Railway.app</strong> (free 1-click Python hosting), or connect your deployed backend URL below:' : 
+            'Unable to reach the Python/FastAPI backend at <code>' + (API_BASE || window.location.origin) + '</code>. Please check that your server is running.'}
+        </p>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <input id="api-base-input" placeholder="https://your-api.onrender.com" value="${esc(API_BASE)}" style="background:var(--card);border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:6px;font-size:13px;min-width:260px;outline:none">
+          <button onclick="saveApiBase()" style="background:var(--accent);border:0;color:#fff;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer">Connect</button>
+        </div>
+      </div>`;
   } finally {
     grid.classList.remove('loading');
   }
@@ -1237,7 +1270,7 @@ async function openPlayer(id){
   track.kind = 'subtitles';
   track.label = 'English';
   track.srclang = 'en';
-  track.src = `/api/subtitles/${id}`;
+  track.src = (API_BASE || '') + `/api/subtitles/${id}`;
   track.default = true;
   video.appendChild(track);
   track.addEventListener('load', ()=>{
@@ -1245,7 +1278,7 @@ async function openPlayer(id){
   });
 
   try {
-    const m = await (await fetch('/api/movie/' + id)).json();
+    const m = await (await fetch(API_BASE + '/api/movie/' + id)).json();
     document.getElementById('p-title').textContent = `${m.title} ${m.year?'('+m.year+')':''}`;
     document.getElementById('p-syn').textContent = m.synopsis || '';
   } catch(e) {
@@ -1276,7 +1309,7 @@ async function fetchStream(id, fresh = false){
   }, 16000);
 
   try {
-    const res = await fetch(`/api/stream/${id}${fresh?'?fresh=1':''}`, {
+    const res = await fetch(API_BASE + `/api/stream/${id}${fresh?'?fresh=1':''}`, {
       signal: currentStreamAbort.signal
     });
     clearTimeout(timeoutId);
@@ -1319,6 +1352,7 @@ async function selfHeal(){
 }
 
 function attach(url){
+  if(url && url.startsWith('/') && API_BASE) url = API_BASE + url;
   if(video.canPlayType('application/vnd.apple.mpegurl')){
     video.src = url;
     video.play().catch(()=>{});
@@ -1482,7 +1516,7 @@ async function renderSearchDropdown(query){
   qClear.style.display = 'block';
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}&limit=8`);
+    const res = await fetch(API_BASE + `/api/search?q=${encodeURIComponent(query.trim())}&limit=8`);
     const data = await res.json();
     if(!searchDropdown) return;
 

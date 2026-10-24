@@ -26,6 +26,7 @@ __pycache__/
 *.py[cod]
 
 # Database
-*.db
 *.sqlite3
+# yomovies.db is tracked for direct cloud deployments
+
 
