@@ -26,12 +26,14 @@ with sync_playwright() as p:
     pager_text = page.eval_on_selector('#pager', 'el => el.textContent')
     print('After clicking Next twice:', pager_text.strip().replace('\n', ' '))
     
-    # Click 'MyMovies'
-    page.click('h1:has-text("MyMovies")')
+    # Click 'CineMyMovies'
+    page.click('h1:has-text("CineMyMovies")')
     time.sleep(1)
     pager_text_home = page.eval_on_selector('#pager', 'el => el.textContent')
-    print('After clicking MyMovies header:', pager_text_home.strip().replace('\n', ' '))
-    assert 'Page 1' in pager_text_home, f"Expected Page 1 after clicking MyMovies, got: {pager_text_home}"
+    print('After clicking CineMyMovies header:', pager_text_home.strip().replace('\n', ' '))
+    assert 'Page 1' in pager_text_home, (
+        f"Expected Page 1 after clicking CineMyMovies, got: {pager_text_home}"
+    )
     
     # 3. Open movie player (Gold id=4 has verified subs and stream)
     print('Opening movie player...')

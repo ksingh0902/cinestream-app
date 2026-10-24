@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -46,72 +48,142 @@ class HttpClient:
         self._playwright = None
         self._browser = None
         self._page = None
+        self._lock = threading.Lock()
+
+        # Load persisted cookies (e.g. Cloudflare cf_clearance) from disk
+        self._cookie_file = (self.cache_dir / "cookies.json") if self.cache_dir else None
+        if self._cookie_file and self._cookie_file.exists():
+            try:
+                c_list = json.loads(self._cookie_file.read_text(encoding="utf-8"))
+                for c in c_list:
+                    self.s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+            except Exception:
+                pass
 
     def _cache(self, url: str) -> Optional[Path]:
         return (self.cache_dir / (hashlib.sha1(url.encode()).hexdigest() + ".html")
                 if self.cache_dir else None)
 
     def _browser_get(self, url: str) -> str:
-        if self._page is None:
-            from playwright.sync_api import sync_playwright
-            self._playwright = sync_playwright().start()
-            chrome_path = None
-            for p in [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                      r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]:
-                if os.path.exists(p):
-                    chrome_path = p
-                    break
-            args = [
-                "--disable-blink-features=AutomationControlled",
-                "--window-position=-2400,-2400",
-                "--window-size=1280,800"
-            ]
-            self._browser = self._playwright.chromium.launch(
-                executable_path=chrome_path, headless=False, args=args
-            )
-            ctx = self._browser.new_context()
-            ctx.on("page", lambda p: p.close())
-            self._page = ctx.new_page()
+        with self._lock:
+            try:
+                if self._page is None:
+                    from playwright.sync_api import sync_playwright
+                    self._playwright = sync_playwright().start()
+                    chrome_path = None
+                    for p in [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                              r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]:
+                        if os.path.exists(p):
+                            chrome_path = p
+                            break
+                    args = [
+                        "--disable-blink-features=AutomationControlled",
+                        "--window-position=-2400,-2400",
+                        "--window-size=1280,800"
+                    ]
+                    self._browser = self._playwright.chromium.launch(
+                        executable_path=chrome_path, headless=False, args=args
+                    )
+                    ctx = self._browser.new_context()
+                    self._page = ctx.new_page()
+                    self._page.on("popup", lambda p: p.close())
 
-        try:
-            self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-        except Exception:
-            pass
-        for _ in range(15):
-            if "Just a moment" not in self._page.title():
-                break
-            self._page.wait_for_timeout(500)
-        return self._page.content()
+                try:
+                    self._page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                except Exception:
+                    pass
+                for _ in range(20):
+                    try:
+                        title = self._page.title()
+                        if "Just a moment" not in title and title.strip():
+                            try:
+                                self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+                            except Exception:
+                                pass
+                            content = self._page.content()
+                            c_data = []
+                            for c in self._page.context.cookies():
+                                self.s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+                                c_data.append({"name": c["name"], "value": c["value"], "domain": c.get("domain", "")})
+                            if self._cookie_file and c_data:
+                                try:
+                                    self._cookie_file.write_text(json.dumps(c_data), encoding="utf-8")
+                                except Exception:
+                                    pass
+                            return content
+                    except Exception:
+                        pass
+                    self._page.wait_for_timeout(400)
+
+                c_data = []
+                try:
+                    for c in self._page.context.cookies():
+                        self.s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+                        c_data.append({"name": c["name"], "value": c["value"], "domain": c.get("domain", "")})
+                    if self._cookie_file and c_data:
+                        self._cookie_file.write_text(json.dumps(c_data), encoding="utf-8")
+                except Exception:
+                    pass
+                try:
+                    return self._page.content()
+                except Exception:
+                    return ""
+            except Exception:
+                try:
+                    if self._browser: self._browser.close()
+                except Exception:
+                    pass
+                try:
+                    if self._playwright: self._playwright.stop()
+                except Exception:
+                    pass
+                self._page = None
+                self._browser = None
+                self._playwright = None
+                return ""
 
     def get(self, url: str, *, referer: Optional[str] = None,
             force: bool = False) -> str:
         cf = self._cache(url)
         if self.use_cache and cf and cf.exists() and not force:
-            return cf.read_text(encoding="utf-8", errors="ignore")
+            cached_text = cf.read_text(encoding="utf-8", errors="ignore")
+            if "Just a moment..." not in cached_text and len(cached_text) > 1000:
+                return cached_text
 
         gap = time.time() - self._last
         if gap < self.delay:
             time.sleep(self.delay - gap)
 
         text = None
-        if "yomovies.wine" in url:
-            text = self._browser_get(url)
-        else:
+        # Try fast requests first if cookies are established
+        if self.s.cookies:
             try:
                 r = self.s.get(url, headers=headers_for(url, referer), timeout=self.timeout)
-                if r.status_code == 403:
-                    raise requests.HTTPError(response=r)
-                r.raise_for_status()
-                r.encoding = r.apparent_encoding or "utf-8"
-                text = r.text
-            except Exception as e:
+                if r.status_code == 200 and "Just a moment" not in r.text:
+                    r.encoding = r.apparent_encoding or "utf-8"
+                    text = r.text
+            except Exception:
+                text = None
+
+        if text is None:
+            if "yomovies.wine" in url:
+                text = self._browser_get(url)
+            else:
                 try:
-                    text = self._browser_get(url)
-                except Exception:
-                    raise e
+                    r = self.s.get(url, headers=headers_for(url, referer), timeout=self.timeout)
+                    if r.status_code == 403:
+                        raise requests.HTTPError(response=r)
+                    r.raise_for_status()
+                    r.encoding = r.apparent_encoding or "utf-8"
+                    text = r.text
+                except Exception as e:
+                    try:
+                        text = self._browser_get(url)
+                    except Exception:
+                        raise e
 
         self._last = time.time()
-        if self.use_cache and cf and text:
+        if self.use_cache and cf and text and "Just a moment..." not in text:
             cf.write_text(text, encoding="utf-8")
         return text
 

@@ -26,8 +26,9 @@ class StreamResolver:
 
         from .extract import parse_embed
         candidates = [embed_url] if embed_url else []
-        # R3 fallback: if we only have a code, try the configured host template
-        candidates.append(f"{DEFAULT_EMBED_HOST}/embed-{code}.html")
+        default_candidate = f"{DEFAULT_EMBED_HOST}/embed-{code}.html"
+        if default_candidate not in candidates:
+            candidates.append(default_candidate)
 
         for url in candidates:
             if not url:

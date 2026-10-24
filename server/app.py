@@ -20,11 +20,20 @@ from scraper.http import HttpClient, headers_for
 from scraper.resolve import StreamResolver
 from scraper.store import connect
 
-app = FastAPI(title="MyMovies API")
+app = FastAPI(title="CineMyMovies API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
-_http = HttpClient(delay=0.0, cache_dir=None)
+@app.middleware("http")
+async def add_no_cache_for_html(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path in ("/", "/index.html") or response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+_http = HttpClient(delay=0.0, cache_dir=".cache")
 _resolver = StreamResolver(_http)
 _client = httpx.AsyncClient(timeout=30, follow_redirects=True)
 
@@ -43,18 +52,47 @@ def _row(r) -> dict:
     return d
 
 
+ADULT_EXCLUSION_SQL = (
+    "quality != '18+' AND (quality NOT LIKE '%18+%' OR quality IS NULL) "
+    "AND (genres NOT LIKE '%\"Erotic Movies\"%' OR genres IS NULL) "
+    "AND title NOT LIKE '%(Ullu%' "
+    "AND title NOT LIKE '%(PrimeShots%' "
+    "AND title NOT LIKE '%(Hunters%' "
+    "AND title NOT LIKE '%(WOOW%' "
+    "AND title NOT LIKE '%(HuntCinema%' "
+    "AND title NOT LIKE '%(Mastiplay%' "
+    "AND title NOT LIKE '%(BulbulPlay%' "
+    "AND title NOT LIKE '%(Besharams%' "
+    "AND title NOT LIKE '%(Kaddu%' "
+    "AND title NOT LIKE '%(DesiPrime%' "
+    "AND title NOT LIKE '%(Hotshots%' "
+    "AND title NOT LIKE '%(MoodX%' "
+    "AND title NOT LIKE '%(Voovi%' "
+    "AND title NOT LIKE '%(Chikooflix%' "
+    "AND title NOT LIKE '%(Bigshots%' "
+    "AND title NOT LIKE '%(Atrangii%'"
+)
+
+
 # ---------------------------------------------------------------- catalogue
 @app.get("/api/movies")
 def movies(q: Optional[str] = None, genre: Optional[str] = None,
            year: Optional[str] = None, series: Optional[int] = None,
-           sort: str = "year", page: int = 1, per_page: int = 48):
-    w, a = ["title IS NOT NULL AND title != ''"], []
+           sort: str = "recent", page: int = 1, per_page: int = 48):
+    w, a = ["title IS NOT NULL AND title != ''", ADULT_EXCLUSION_SQL], []
     if q:      w.append("title LIKE ?");  a.append(f"%{q}%")
-    if genre:  w.append("genres LIKE ?"); a.append(f'%"{genre}"%')
+    if genre:
+        w.append("(genres LIKE ? OR quality = ? OR title LIKE ?)")
+        a.extend([f'%"{genre}"%', genre, f"%{genre}%"])
     if year:   w.append("year = ?");      a.append(year)
     if series is not None: w.append("is_series = ?"); a.append(series)
-    order = {"year": "CAST(year AS INT) DESC", "recent": "updated_at DESC",
-             "imdb": "CAST(imdb AS REAL) DESC", "title": "title"}.get(sort, "CAST(year AS INT) DESC")
+    order_map = {
+        "recent": "CAST(year AS INT) DESC, id ASC",
+        "year": "CAST(year AS INT) DESC, id ASC",
+        "imdb": "CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL) DESC, CAST(year AS INT) DESC, id ASC",
+        "title": "title ASC, CAST(year AS INT) DESC"
+    }
+    order = order_map.get(sort, "CAST(year AS INT) DESC, id ASC")
     sql = "SELECT * FROM movies" + (" WHERE " + " AND ".join(w) if w else "")
     c = db()
     total = c.execute(sql.replace("SELECT *", "SELECT COUNT(*)"), a).fetchone()[0]
@@ -62,6 +100,32 @@ def movies(q: Optional[str] = None, genre: Optional[str] = None,
                      a + [per_page, (page - 1) * per_page]).fetchall()
     return {"total": total, "page": page, "per_page": per_page,
             "items": [_row(r) for r in rows]}
+
+
+@app.get("/api/search")
+def search_titles(q: str = "", limit: int = 10):
+    """Instant search suggestions for search bar dropdown across 10,000+ movies."""
+    q_str = (q or "").strip()
+    if not q_str:
+        return {"total": 0, "items": []}
+    c = db()
+    term = f"%{q_str}%"
+    total = c.execute(
+        f"SELECT COUNT(*) FROM movies WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL})", (term,)
+    ).fetchone()[0]
+    rows = c.execute(
+        f"SELECT id, title, year, poster, quality, imdb, is_series FROM movies "
+        f"WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL}) "
+        f"ORDER BY CASE WHEN title LIKE ? THEN 0 ELSE 1 END, "
+        f"CAST(year AS INT) DESC, id ASC LIMIT ?",
+        (term, f"{q_str}%", min(limit, 50))
+    ).fetchall()
+    return {"total": total, "items": [dict(r) for r in rows]}
+
+
+@app.get("/api/genres")
+def genres():
+    return ["Bollywood", "Hollywood", "Punjabi", "South Special", "Action", "Comedy", "Drama", "Thriller", "Horror", "Romance", "Crime", "Mystery", "Sci-fi", "Animation"]
 
 
 @app.get("/api/movie/{mid}")
@@ -147,7 +211,10 @@ def _payload(mid: int, embed: dict, data: dict) -> dict:
 async def proxy_hls(u: str = Query(...)):
     """Rewrite master + media playlists so hls.js is never CORS-blocked (R4)."""
     url = unquote(u)
-    r = await _client.get(url, headers=headers_for(url))
+    try:
+        r = await _client.get(url, headers=headers_for(url), timeout=12)
+    except Exception as e:
+        raise HTTPException(504, f"upstream playlist error: {e}")
     if r.status_code >= 400:
         raise HTTPException(r.status_code, "upstream playlist error")
     base, text = str(r.url), r.text
@@ -189,7 +256,10 @@ async def proxy_seg(u: str = Query(...), request: Request = None):
     rng = request.headers.get("range") if request else None
     if rng:
         hdrs["Range"] = rng
-    r = await _client.get(url, headers=hdrs)
+    try:
+        r = await _client.get(url, headers=hdrs, timeout=15)
+    except Exception as e:
+        raise HTTPException(504, f"upstream segment error: {e}")
 
     out = {"Content-Type": r.headers.get("content-type", "video/mp2t"),
            "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400"}

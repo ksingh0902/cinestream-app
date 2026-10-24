@@ -1,4 +1,4 @@
-# MyMovies
+# CineMyMovies
 
 Personal streaming front-end for yomovies.wine.
 

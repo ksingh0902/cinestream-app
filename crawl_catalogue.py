@@ -7,15 +7,16 @@ from scraper.store import connect, upsert, set_meta
 from scraper.extract import parse_listing, parse_pagination
 from scraper.crawl import SEEDS, pick_base
 
-TARGET_COUNT = 1050
+TARGET_COUNT = 10500
 
 def run():
     print(f"Starting catalogue crawl targeting {TARGET_COUNT}+ titles...", flush=True)
     con = connect("yomovies.db")
-    http = HttpClient(delay=0.1)
+    http = HttpClient(delay=0.05)
     base = pick_base(http)
 
-    current_total = con.execute("SELECT COUNT(*) FROM movies WHERE title IS NOT NULL AND title != ''").fetchone()[0]
+    query = "SELECT COUNT(*) FROM movies WHERE title IS NOT NULL AND title != ''"
+    current_total = con.execute(query).fetchone()[0]
     print(f"Existing titles in DB: {current_total}", flush=True)
 
     seen = set(r[0] for r in con.execute("SELECT url FROM movies WHERE url IS NOT NULL").fetchall())
@@ -25,7 +26,7 @@ def run():
             break
 
         page = 1
-        max_pages_per_seed = 10
+        max_pages_per_seed = 50
         while page <= max_pages_per_seed and current_total < TARGET_COUNT:
             url = base + seed if page == 1 else f"{base}{seed}page/{page}/"
             try:
@@ -51,9 +52,9 @@ def run():
                 if current_total >= TARGET_COUNT:
                     break
 
-            print(f"[page] {seed} p{page} -> +{new_in_page} (Total in DB: {current_total})", flush=True)
-            nxt = parse_pagination(html, base)
-            if not nxt:
+            print(f"[page] {seed} p{page} -> +{new_in_page} "
+                  f"(Total in DB: {current_total})", flush=True)
+            if not cards or len(cards) < 5:
                 break
             page += 1
 

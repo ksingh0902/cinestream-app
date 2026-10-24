@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS movies (
 CREATE INDEX IF NOT EXISTS ix_year   ON movies(year);
 CREATE INDEX IF NOT EXISTS ix_series ON movies(is_series);
 CREATE INDEX IF NOT EXISTS ix_upd    ON movies(updated_at);
+CREATE INDEX IF NOT EXISTS ix_title  ON movies(title COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
