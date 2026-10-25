@@ -23,11 +23,18 @@ from .service import (
     admin_change_viewer_password,
     admin_sign_out_all_viewers,
     authenticate_user,
+    issue_user_session,
     terminate_session,
     validate_session,
 )
-from .store import count_active_sessions, get_user_by_role
-from .templates import render_admin_page, render_login_page
+from .store import (
+    complete_initial_setup,
+    count_active_sessions,
+    get_user,
+    get_user_by_role,
+    is_setup_completed,
+)
+from .templates import render_admin_page, render_login_page, render_setup_page
 
 logger = logging.getLogger("cinemymovies.auth.routes")
 
@@ -60,6 +67,99 @@ def _set_no_cache(response: Response) -> None:
     response.headers["Expires"] = "0"
 
 
+@auth_router.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request, error: Optional[str] = None):
+    """Render one-time initial setup page if not yet completed."""
+    if is_setup_completed():
+        return RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
+
+    csrf_token = request.cookies.get(CSRF_COOKIE_NAME) or generate_csrf_token()
+    html_content = render_setup_page(csrf_token=csrf_token, error=error)
+    resp = HTMLResponse(content=html_content, status_code=200)
+    resp.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=False,
+        secure=_is_secure_request(request),
+        samesite="lax",
+        path="/",
+        max_age=3600,
+    )
+    _set_no_cache(resp)
+    return resp
+
+
+@auth_router.post("/setup")
+async def setup_submit(
+    request: Request,
+    admin_password: str = Form(""),
+    confirm_admin_password: str = Form(""),
+    viewer_password: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Process initial password configuration for admin and viewer."""
+    if is_setup_completed():
+        return RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
+
+    cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME)
+    if not verify_csrf_token(csrf_token, cookie_csrf):
+        new_csrf = generate_csrf_token()
+        resp = HTMLResponse(
+            render_setup_page(csrf_token=new_csrf, error="Session expired or invalid form submission. Please try again."),
+            status_code=403,
+        )
+        resp.set_cookie(CSRF_COOKIE_NAME, new_csrf, httponly=False, secure=_is_secure_request(request), samesite="lax", path="/", max_age=3600)
+        _set_no_cache(resp)
+        return resp
+
+    if admin_password != confirm_admin_password:
+        new_csrf = generate_csrf_token()
+        resp = HTMLResponse(
+            render_setup_page(csrf_token=new_csrf, error="Administrator passwords do not match."),
+            status_code=400,
+        )
+        resp.set_cookie(CSRF_COOKIE_NAME, new_csrf, httponly=False, secure=_is_secure_request(request), samesite="lax", path="/", max_age=3600)
+        _set_no_cache(resp)
+        return resp
+
+    ok, err = complete_initial_setup(
+        admin_password=admin_password,
+        viewer_password=viewer_password,
+    )
+    if not ok:
+        new_csrf = generate_csrf_token()
+        resp = HTMLResponse(
+            render_setup_page(csrf_token=new_csrf, error=err or "Setup failed."),
+            status_code=400,
+        )
+        resp.set_cookie(CSRF_COOKIE_NAME, new_csrf, httponly=False, secure=_is_secure_request(request), samesite="lax", path="/", max_age=3600)
+        _set_no_cache(resp)
+        return resp
+
+    # Immediately log in admin
+    ip_address = _get_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    admin_user = get_user("admin")
+    sess_id, token_val = issue_user_session(
+        admin_user or {"username": "admin", "role": "admin", "auth_version": 1},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+    resp = RedirectResponse(url="/admin?notice=Setup+completed+successfully!+Welcome+to+CineMyMovies.", status_code=303)
+    resp.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token_val,
+        httponly=True,
+        secure=_is_secure_request(request),
+        samesite="lax",
+        path="/",
+        max_age=SESSION_MAX_AGE_SECONDS,
+    )
+    _set_no_cache(resp)
+    return resp
+
+
 @auth_router.get("/login", response_class=HTMLResponse)
 async def login_page(
     request: Request,
@@ -68,6 +168,9 @@ async def login_page(
     error: Optional[str] = None,
 ):
     """Render login page with CSRF protection and redirect-safety."""
+    if not is_setup_completed():
+        return RedirectResponse(url="/setup", status_code=303)
+
     # Check if already authenticated
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:

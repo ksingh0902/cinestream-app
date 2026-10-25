@@ -583,3 +583,229 @@ input[type="text"]:focus, input[type="password"]:focus {{
 </main>
 </body>
 </html>"""
+
+
+def render_setup_page(
+    csrf_token: str,
+    error: Optional[str] = None,
+) -> str:
+    """Render the one-time initial setup interface for configuring admin & viewer credentials."""
+    csrf_clean = _esc(csrf_token)
+    error_html = (
+        f'<div class="alert alert-error" role="alert"><span>⚠️</span> {html.escape(error)}</div>'
+        if error
+        else ""
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Initial Setup - CineMyMovies</title>
+<style>
+:root {{
+  --bg: #0e0f13;
+  --card: #181a20;
+  --card-hover: #222630;
+  --accent: #ff7b39;
+  --accent-glow: rgba(255,123,57,0.25);
+  --txt: #ececed;
+  --dim: #9aa0aa;
+  --border: #262932;
+  --error: #ef4444;
+  --error-bg: rgba(239, 68, 68, 0.12);
+  --notice-bg: rgba(59, 130, 246, 0.12);
+  --notice-border: #3b82f6;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  background: var(--bg);
+  color: var(--txt);
+  font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background-image: radial-gradient(circle at 50% 15%, rgba(255,123,57,0.1), transparent 50%);
+}}
+.setup-card {{
+  width: 100%;
+  max-width: 480px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 32px 28px;
+  box-shadow: 0 16px 45px rgba(0,0,0,0.6);
+}}
+.brand {{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  text-decoration: none;
+}}
+.brand .logo {{ font-size: 28px; }}
+.brand h1 {{
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #fff;
+}}
+.brand span {{ color: var(--accent); }}
+.subtitle {{
+  text-align: center;
+  color: var(--dim);
+  font-size: 13px;
+  margin-top: -12px;
+  margin-bottom: 22px;
+  line-height: 1.4;
+}}
+.alert {{
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}}
+.alert-error {{
+  background: var(--error-bg);
+  border: 1px solid var(--error);
+  color: #fca5a5;
+}}
+.section-title {{
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin: 18px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}}
+.field {{ margin-bottom: 14px; }}
+.field label {{
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 5px;
+}}
+.input-wrap {{
+  position: relative;
+  display: flex;
+  align-items: center;
+}}
+input[type="text"], input[type="password"] {{
+  width: 100%;
+  background: #111317;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #fff;
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}}
+input[type="text"]:focus, input[type="password"]:focus {{
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}}
+.toggle-btn {{
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
+}}
+.toggle-btn:hover {{ color: #fff; }}
+.btn-submit {{
+  width: 100%;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 18px;
+  transition: background .15s, transform .1s;
+  box-shadow: 0 4px 14px rgba(255,123,57,0.35);
+}}
+.btn-submit:hover {{ background: #ff6a1f; }}
+.btn-submit:active {{ transform: scale(0.99); }}
+.note {{
+  margin-top: 20px;
+  font-size: 11.5px;
+  color: var(--dim);
+  text-align: center;
+  line-height: 1.4;
+}}
+</style>
+</head>
+<body>
+<div class="setup-card">
+  <div class="brand">
+    <span class="logo">🎬</span>
+    <h1>Cine<span>My</span>Movies</h1>
+  </div>
+  <p class="subtitle">Welcome! Set up your private Administrator and Shared Viewer passwords to secure this instance.</p>
+
+  {error_html}
+
+  <form method="POST" action="/setup" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{csrf_clean}">
+
+    <div class="section-title">👤 Administrator Account</div>
+    <div class="field">
+      <label for="admin_password">Admin Password (min. 8 characters)</label>
+      <div class="input-wrap">
+        <input type="password" id="admin_password" name="admin_password" required minlength="8" placeholder="Create your admin password" autocomplete="new-password">
+        <button type="button" class="toggle-btn" onclick="togglePass('admin_password', this)">👁️</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="confirm_admin_password">Confirm Admin Password</label>
+      <div class="input-wrap">
+        <input type="password" id="confirm_admin_password" name="confirm_admin_password" required minlength="8" placeholder="Repeat admin password" autocomplete="new-password">
+        <button type="button" class="toggle-btn" onclick="togglePass('confirm_admin_password', this)">👁️</button>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:22px">👥 Shared Viewer Account</div>
+    <div class="field">
+      <label for="viewer_password">Shared Viewer Password (min. 6 characters)</label>
+      <div class="input-wrap">
+        <input type="password" id="viewer_password" name="viewer_password" required minlength="6" placeholder="Create shared password for your group" autocomplete="new-password">
+        <button type="button" class="toggle-btn" onclick="togglePass('viewer_password', this)">👁️</button>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-submit">🚀 Complete Setup & Sign In</button>
+  </form>
+
+  <p class="note">🔒 Passwords are encrypted with bcrypt (12 rounds) and stored securely. You can manage and rotate viewer sessions anytime from the Admin Console.</p>
+</div>
+
+<script>
+function togglePass(id, btn) {{
+  const inp = document.getElementById(id);
+  if (inp.type === 'password') {{
+    inp.type = 'text';
+    btn.textContent = '🔒';
+  }} else {{
+    inp.type = 'password';
+    btn.textContent = '👁️';
+  }}
+}}
+</script>
+</body>
+</html>"""
+

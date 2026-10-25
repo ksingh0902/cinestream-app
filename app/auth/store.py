@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS auth_login_attempts (
     locked_until INTEGER NOT NULL DEFAULT 0,
     last_attempt INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS auth_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -67,76 +72,106 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 
+def get_meta_value(key: str) -> Optional[str]:
+    """Retrieve metadata flag from auth_meta table."""
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT value FROM auth_meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+
+def set_meta_value(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Store or update metadata flag in auth_meta table."""
+    conn.execute(
+        "INSERT INTO auth_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def is_setup_completed() -> bool:
+    """Check if initial setup has been completed."""
+    val = get_meta_value("setup_completed")
+    return val == "1"
+
+
+def complete_initial_setup(
+    admin_password: str,
+    viewer_password: str,
+    admin_username: str = ADMIN_USERNAME,
+    viewer_username: str = VIEWER_USERNAME,
+) -> Tuple[bool, Optional[str]]:
+    """Complete initial setup by setting admin and viewer passwords."""
+    if is_setup_completed():
+        return False, "Initial setup has already been completed."
+
+    if not admin_password or len(admin_password) < 8:
+        return False, "Administrator password must be at least 8 characters long."
+
+    if not viewer_password or len(viewer_password) < 6:
+        return False, "Shared viewer password must be at least 6 characters long."
+
+    now = int(time.time())
+    admin_hash = hash_password(admin_password)
+    viewer_hash = hash_password(viewer_password)
+
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
+            VALUES (?, ?, 'admin', 1, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at
+            """,
+            (admin_username.strip() or "admin", admin_hash, now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
+            VALUES (?, ?, 'viewer', 1, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at
+            """,
+            (viewer_username.strip() or "viewer", viewer_hash, now, now),
+        )
+        set_meta_value(conn, "setup_completed", "1")
+        conn.execute("DELETE FROM auth_login_attempts")
+        conn.commit()
+
+    logger.info("Initial setup completed successfully for admin and viewer.")
+    return True, None
+
+
 def init_auth_db() -> None:
-    """Initialize auth tables and bootstrap initial credentials if not already present."""
+    """Initialize auth tables and bootstrap initial credentials if provided in env."""
     with get_db_connection() as conn:
         conn.executescript(DDL_STATEMENTS)
         conn.commit()
 
         now = int(time.time())
 
-        # 1. Bootstrap Admin Account
-        cur = conn.cursor()
-        cur.execute("SELECT username FROM auth_users WHERE username = ?", (ADMIN_USERNAME,))
-        if not cur.fetchone():
-            if ADMIN_INITIAL_PASSWORD:
-                admin_hash = hash_password(ADMIN_INITIAL_PASSWORD)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'admin', 1, ?, ?)
-                    """,
-                    (ADMIN_USERNAME, admin_hash, now, now),
-                )
-                logger.info("Initialized administrator account '%s' from ADMIN_INITIAL_PASSWORD.", ADMIN_USERNAME)
-            else:
-                import secrets
-                temp_admin_pw = secrets.token_urlsafe(16)
-                admin_hash = hash_password(temp_admin_pw)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'admin', 1, ?, ?)
-                    """,
-                    (ADMIN_USERNAME, admin_hash, now, now),
-                )
-                print("=" * 65)
-                print("[AUTH SETUP] Generated Initial Admin Credentials:")
-                print(f"   Username: {ADMIN_USERNAME}")
-                print(f"   Password: {temp_admin_pw}")
-                print("   Set ADMIN_INITIAL_PASSWORD in your .env or Render dashboard to customize.")
-                print("=" * 65)
+        # If environment variables provide credentials, configure them automatically
+        if ADMIN_INITIAL_PASSWORD:
+            admin_hash = hash_password(ADMIN_INITIAL_PASSWORD)
+            conn.execute(
+                """
+                INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
+                VALUES (?, ?, 'admin', 1, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at
+                """,
+                (ADMIN_USERNAME, admin_hash, now, now),
+            )
+            set_meta_value(conn, "setup_completed", "1")
+            conn.execute("DELETE FROM auth_login_attempts")
+            logger.info("Administrator account initialized/synced from ADMIN_INITIAL_PASSWORD.")
 
-        # 2. Bootstrap Shared Viewer Account
-        cur.execute("SELECT username FROM auth_users WHERE username = ?", (VIEWER_USERNAME,))
-        if not cur.fetchone():
-            if VIEWER_INITIAL_PASSWORD:
-                viewer_hash = hash_password(VIEWER_INITIAL_PASSWORD)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'viewer', 1, ?, ?)
-                    """,
-                    (VIEWER_USERNAME, viewer_hash, now, now),
-                )
-                logger.info("Initialized shared viewer account '%s' from VIEWER_INITIAL_PASSWORD.", VIEWER_USERNAME)
-            else:
-                import secrets
-                temp_viewer_pw = secrets.token_urlsafe(14)
-                viewer_hash = hash_password(temp_viewer_pw)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'viewer', 1, ?, ?)
-                    """,
-                    (VIEWER_USERNAME, viewer_hash, now, now),
-                )
-                print("=" * 65)
-                print("[AUTH SETUP] Generated Initial Shared Viewer Credentials:")
-                print(f"   Username: {VIEWER_USERNAME}")
-                print(f"   Password: {temp_viewer_pw}")
-                print("   Set VIEWER_INITIAL_PASSWORD in your .env or Render dashboard to customize.")
-                print("=" * 65)
+        if VIEWER_INITIAL_PASSWORD:
+            viewer_hash = hash_password(VIEWER_INITIAL_PASSWORD)
+            conn.execute(
+                """
+                INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
+                VALUES (?, ?, 'viewer', 1, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at
+                """,
+                (VIEWER_USERNAME, viewer_hash, now, now),
+            )
+            logger.info("Shared viewer account initialized/synced from VIEWER_INITIAL_PASSWORD.")
 
         conn.commit()
 

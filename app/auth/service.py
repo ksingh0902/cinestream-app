@@ -78,15 +78,25 @@ def authenticate_user(
         clear_failed_attempts(user_key)
 
     # Issue session
+    session_id, signed_token = issue_user_session(user, ip_address, user_agent)
+    return user, signed_token, None
+
+
+def issue_user_session(
+    user: Dict[str, Any],
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Issue, store, and cryptographically sign a new session for a user."""
     now = int(time.time())
     expires_at = now + SESSION_MAX_AGE_SECONDS
     session_id = generate_session_id()
-    auth_version = user["auth_version"]
+    auth_version = user.get("auth_version", 1)
     role = user["role"]
 
     create_session(
         session_id=session_id,
-        username=username,
+        username=user["username"],
         role=role,
         auth_version=auth_version,
         expires_at=expires_at,
@@ -95,7 +105,7 @@ def authenticate_user(
     )
 
     signed_token = sign_session_token(session_id)
-    return user, signed_token, None
+    return session_id, signed_token
 
 
 def validate_session(signed_token: str) -> Optional[Dict[str, Any]]:

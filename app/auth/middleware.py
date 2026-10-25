@@ -10,12 +10,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import SESSION_COOKIE_NAME
 from .service import validate_session
+from .store import is_setup_completed
 
 logger = logging.getLogger("cinemymovies.auth.middleware")
 
 PUBLIC_PREFIXES = (
     "/login",
     "/logout",
+    "/setup",
     "/api/auth/check",
     "/favicon.ico",
 )
@@ -38,11 +40,28 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
         if any(path == p or path.startswith(f"{p}/") or path.startswith(f"{p}?") for p in PUBLIC_PREFIXES):
             return await call_next(request)
 
-        # 2. Check for session cookie
+        # 2. If initial setup has not been completed, redirect to /setup
+        if not is_setup_completed():
+            accept = request.headers.get("accept", "")
+            is_html_request = (
+                path in ("/", "/index.html", "/admin", "/login")
+                or path.endswith(".html")
+                or ("text/html" in accept and not path.startswith(("/api/", "/proxy/")))
+            )
+            if is_html_request:
+                resp = RedirectResponse(url="/setup", status_code=303)
+                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+                return resp
+            body = json.dumps({"detail": "Initial setup required", "setup_url": "/setup"})
+            resp = Response(content=body, status_code=401, media_type="application/json")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            return resp
+
+        # 3. Check for session cookie
         token = request.cookies.get(SESSION_COOKIE_NAME)
         session = validate_session(token) if token else None
 
-        # 3. Handle unauthenticated requests
+        # 4. Handle unauthenticated requests
         if not session:
             # Check if this is a browser navigation request for an HTML page
             accept = request.headers.get("accept", "")
