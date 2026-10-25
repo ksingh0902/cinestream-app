@@ -5,28 +5,25 @@ import logging
 from urllib.parse import quote
 
 from fastapi import Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import SESSION_COOKIE_NAME
 from .service import validate_session
-from .store import is_setup_completed
+from .store import AuthSystemState, get_auth_system_state
+from .templates import render_storage_error_page
 
 logger = logging.getLogger("cinemymovies.auth.middleware")
-
-PUBLIC_PREFIXES = (
-    "/login",
-    "/logout",
-    "/setup",
-    "/api/auth/check",
-    "/favicon.ico",
-)
 
 
 class PrivateAccessMiddleware(BaseHTTPMiddleware):
     """
     Server-wide security gate enforcing authentication across all pages,
     APIs, proxies, and media endpoints.
+    Distinguishes:
+      1. STORAGE_UNAVAILABLE -> Returns 503 error screen/JSON; denies access and NEVER exposes setup.
+      2. GENUINELY_UNINITIALIZED -> Directs to /setup for first-time onboarding.
+      3. INITIALIZED -> Permanently locks /setup, enforces session authentication, and routes unauthenticated visitors to /login.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -36,41 +33,72 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
 
-        # 1. Allow public authentication endpoints and browser metadata
-        if any(path == p or path.startswith(f"{p}/") or path.startswith(f"{p}?") for p in PUBLIC_PREFIXES):
+        # 1. Allow browser metadata (favicon)
+        if path == "/favicon.ico":
             return await call_next(request)
 
-        # 2. If initial setup has not been completed, redirect to /setup
-        if not is_setup_completed():
-            accept = request.headers.get("accept", "")
-            is_html_request = (
-                path in ("/", "/index.html", "/admin", "/login")
-                or path.endswith(".html")
-                or ("text/html" in accept and not path.startswith(("/api/", "/proxy/")))
-            )
+        # 2. Check global authentication storage state
+        auth_state, state_err = get_auth_system_state()
+
+        accept = request.headers.get("accept", "")
+        is_html_request = (
+            path in ("/", "/index.html", "/admin", "/login", "/setup")
+            or path.endswith(".html")
+            or ("text/html" in accept and not path.startswith(("/api/", "/proxy/")))
+        )
+
+        # 3. Handle Storage Failure: deny access and show 503 retry screen (NEVER setup)
+        if auth_state == AuthSystemState.STORAGE_UNAVAILABLE:
+            if is_html_request:
+                html_body = render_storage_error_page(error_detail=state_err)
+                resp = HTMLResponse(content=html_body, status_code=503)
+                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+                resp.headers["Pragma"] = "no-cache"
+                resp.headers["Retry-After"] = "5"
+                return resp
+
+            body = json.dumps({
+                "error": "storage_unavailable",
+                "detail": "Authentication storage is temporarily unavailable. Please retry shortly.",
+            })
+            resp = Response(content=body, status_code=503, media_type="application/json")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Retry-After"] = "5"
+            return resp
+
+        # 4. Handle Genuinely Uninitialized State
+        if auth_state == AuthSystemState.GENUINELY_UNINITIALIZED:
+            # Allow setup page and form submission
+            if path == "/setup" or path.startswith("/setup/"):
+                return await call_next(request)
+
             if is_html_request:
                 resp = RedirectResponse(url="/setup", status_code=303)
                 resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
                 return resp
+
             body = json.dumps({"detail": "Initial setup required", "setup_url": "/setup"})
             resp = Response(content=body, status_code=401, media_type="application/json")
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
             return resp
 
-        # 3. Check for session cookie
+        # 5. System is INITIALIZED: Setup is permanently locked
+        if path == "/setup" or path.startswith("/setup/"):
+            resp = RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            return resp
+
+        # Allow public authentication endpoints
+        if any(path == p or path.startswith(f"{p}/") or path.startswith(f"{p}?") for p in ("/login", "/logout", "/api/auth/check")):
+            return await call_next(request)
+
+        # 6. Check for session cookie
         token = request.cookies.get(SESSION_COOKIE_NAME)
         session = validate_session(token) if token else None
 
-        # 4. Handle unauthenticated requests
+        # 7. Handle unauthenticated / expired / revoked sessions -> Always return to /login (NEVER /setup)
         if not session:
-            # Check if this is a browser navigation request for an HTML page
-            accept = request.headers.get("accept", "")
-            is_html_request = (
-                path in ("/", "/index.html", "/admin")
-                or path.endswith(".html")
-                or ("text/html" in accept and not path.startswith(("/api/", "/proxy/")))
-            )
-
             if is_html_request:
                 target_next = quote(request.url.path if request.url.path != "/login" else "/")
                 resp = RedirectResponse(url=f"/login?next={target_next}", status_code=303)
@@ -78,7 +106,6 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
                 resp.headers["Pragma"] = "no-cache"
                 return resp
 
-            # For API, stream proxy, and media requests: return 401 Unauthorized
             body = json.dumps({"detail": "Authentication required", "login_url": "/login"})
             resp = Response(
                 content=body,
@@ -89,11 +116,10 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
             resp.headers["Pragma"] = "no-cache"
             return resp
 
-        # 4. Handle Role-Based Access for Admin paths
+        # 8. Handle Role-Based Access for Admin paths
         if path.startswith("/admin") or path.startswith("/api/admin"):
             if session.get("role") != "admin":
-                accept = request.headers.get("accept", "")
-                if "text/html" in accept:
+                if is_html_request:
                     body = "<h1>403 Forbidden</h1><p>Administrator privileges required.</p><a href='/'>Return to Movies</a>"
                     resp = Response(content=body, status_code=403, media_type="text/html")
                 else:
@@ -102,11 +128,10 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
                 resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
                 return resp
 
-        # 5. Attach authenticated user context to request state
+        # 9. Attach authenticated user context to request state and proceed
         request.state.user = session.get("user")
         request.state.session = session
 
-        # 6. Proceed to endpoint
         response = await call_next(request)
 
         # Ensure no-store on sensitive paths

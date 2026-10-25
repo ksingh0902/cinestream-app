@@ -28,13 +28,20 @@ from .service import (
     validate_session,
 )
 from .store import (
+    AuthSystemState,
     complete_initial_setup,
     count_active_sessions,
+    get_auth_system_state,
     get_user,
     get_user_by_role,
     is_setup_completed,
 )
-from .templates import render_admin_page, render_login_page, render_setup_page
+from .templates import (
+    render_admin_page,
+    render_login_page,
+    render_setup_page,
+    render_storage_error_page,
+)
 
 logger = logging.getLogger("cinemymovies.auth.routes")
 
@@ -69,8 +76,14 @@ def _set_no_cache(response: Response) -> None:
 
 @auth_router.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request, error: Optional[str] = None):
-    """Render one-time initial setup page if not yet completed."""
-    if is_setup_completed():
+    """Render one-time initial setup page if not yet completed and storage is healthy."""
+    state, err = get_auth_system_state()
+    if state == AuthSystemState.STORAGE_UNAVAILABLE:
+        resp = HTMLResponse(content=render_storage_error_page(error_detail=err), status_code=503)
+        _set_no_cache(resp)
+        resp.headers["Retry-After"] = "5"
+        return resp
+    if state == AuthSystemState.INITIALIZED:
         return RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
 
     csrf_token = request.cookies.get(CSRF_COOKIE_NAME) or generate_csrf_token()
@@ -97,8 +110,14 @@ async def setup_submit(
     viewer_password: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Process initial password configuration for admin and viewer."""
-    if is_setup_completed():
+    """Process initial password configuration for admin and viewer. Permanently locked once initialized."""
+    state, err = get_auth_system_state()
+    if state == AuthSystemState.STORAGE_UNAVAILABLE:
+        resp = HTMLResponse(content=render_storage_error_page(error_detail=err), status_code=503)
+        _set_no_cache(resp)
+        resp.headers["Retry-After"] = "5"
+        return resp
+    if state == AuthSystemState.INITIALIZED:
         return RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
 
     cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME)
@@ -130,7 +149,7 @@ async def setup_submit(
         new_csrf = generate_csrf_token()
         resp = HTMLResponse(
             render_setup_page(csrf_token=new_csrf, error=err or "Setup failed."),
-            status_code=400,
+            status_code=403 if "locked" in (err or "").lower() else 400,
         )
         resp.set_cookie(CSRF_COOKIE_NAME, new_csrf, httponly=False, secure=_is_secure_request(request), samesite="lax", path="/", max_age=3600)
         _set_no_cache(resp)
@@ -168,7 +187,13 @@ async def login_page(
     error: Optional[str] = None,
 ):
     """Render login page with CSRF protection and redirect-safety."""
-    if not is_setup_completed():
+    state, err = get_auth_system_state()
+    if state == AuthSystemState.STORAGE_UNAVAILABLE:
+        resp = HTMLResponse(content=render_storage_error_page(error_detail=err), status_code=503)
+        _set_no_cache(resp)
+        resp.headers["Retry-After"] = "5"
+        return resp
+    if state == AuthSystemState.GENUINELY_UNINITIALIZED:
         return RedirectResponse(url="/setup", status_code=303)
 
     # Check if already authenticated
@@ -277,6 +302,17 @@ async def logout(request: Request):
 @auth_router.get("/api/auth/check")
 async def auth_check(request: Request):
     """Lightweight periodic status endpoint to detect revoked sessions promptly."""
+    state, err = get_auth_system_state()
+    if state == AuthSystemState.STORAGE_UNAVAILABLE:
+        resp = Response(
+            content=import_json().dumps({"authenticated": False, "error": "storage_unavailable", "detail": "Storage unavailable"}),
+            status_code=503,
+            media_type="application/json",
+        )
+        _set_no_cache(resp)
+        resp.headers["Retry-After"] = "5"
+        return resp
+
     token = request.cookies.get(SESSION_COOKIE_NAME)
     resp_data = {"authenticated": False}
     if token:

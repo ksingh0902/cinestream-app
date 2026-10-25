@@ -39,8 +39,33 @@ SESSION_COOKIE_NAME = "cms_session"
 CSRF_COOKIE_NAME = "cms_csrf"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", "604800"))  # 7 days
 
-# Persistent storage database
-AUTH_DB_PATH = os.getenv("AUTH_DB_PATH", DB_PATH or "cinemymovies.sqlite3")
+# Persistent storage database resolution
+def resolve_auth_db_path() -> str:
+    """Resolve durable database path, auto-detecting Render persistent disks or environment configs."""
+    custom = os.getenv("AUTH_DB_PATH", "").strip()
+    if custom:
+        return custom
+
+    # Check standard Render / Linux persistent volume mount points
+    for mount_dir in ("/var/data", "/data", os.getenv("PERSISTENT_DATA_DIR", "").strip()):
+        if mount_dir and os.path.exists(mount_dir) and os.access(mount_dir, os.W_OK):
+            target = os.path.join(mount_dir, "cinemymovies.sqlite3")
+            logger.info("Using persistent volume mount for auth database: %s", target)
+            return target
+
+    if os.path.exists("cinemymovies.sqlite3"):
+        return "cinemymovies.sqlite3"
+    return DB_PATH or "cinemymovies.sqlite3"
+
+AUTH_DB_PATH = resolve_auth_db_path()
+
+def get_setup_lockfile_path() -> Path:
+    """Path to the persistent lock marker indicating initial setup has completed."""
+    db_p = Path(AUTH_DB_PATH)
+    try:
+        return db_p.parent / ".setup_locked"
+    except Exception:
+        return Path(".setup_locked")
 
 # Login rate limiting parameters: 5 failed attempts locks for 5 minutes (300 seconds)
 RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("RATE_LIMIT_MAX_ATTEMPTS", "5"))

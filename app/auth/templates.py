@@ -809,3 +809,124 @@ function togglePass(id, btn) {{
 </body>
 </html>"""
 
+
+def render_storage_error_page(error_detail: Optional[str] = None) -> str:
+    """Render a 503 Service Unavailable error page when authentication storage is unreachable."""
+    detail_html = ""
+    if error_detail:
+        detail_html = f'<div style="font-family:monospace;font-size:11.5px;color:#9aa0aa;background:#111317;padding:10px 14px;border-radius:6px;margin:16px 0 10px;word-break:break-all;text-align:left;">Storage error: {_esc(error_detail)}</div>'
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Service Temporarily Unavailable - CineMyMovies</title>
+<style>
+:root {{
+  --bg: #0e0f13;
+  --card: #181a20;
+  --accent: #ff7b39;
+  --txt: #ececed;
+  --dim: #9aa0aa;
+  --border: #262932;
+  --error: #ef4444;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  background: var(--bg);
+  color: var(--txt);
+  font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-image: radial-gradient(circle at 50% 20%, rgba(239,68,68,0.1), transparent 45%);
+}}
+.error-card {{
+  width: 100%;
+  max-width: 440px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 36px 30px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+  text-align: center;
+}}
+.icon-box {{
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(239,68,68,0.14);
+  border: 1px solid rgba(239,68,68,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  margin: 0 auto 20px;
+}}
+h1 {{
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: #fff;
+}}
+p {{
+  color: var(--dim);
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin-bottom: 22px;
+}}
+.badge {{
+  display: inline-block;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 20px;
+}}
+.btn-retry {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity .15s;
+  text-decoration: none;
+}}
+.btn-retry:hover {{
+  opacity: 0.92;
+}}
+.note {{
+  margin-top: 22px;
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+}}
+</style>
+</head>
+<body>
+<div class="error-card">
+  <div class="icon-box">🗄️</div>
+  <div class="badge">HTTP 503 · Storage Connection Offline</div>
+  <h1>Service Temporarily Unavailable</h1>
+  <p>The server is currently unable to communicate with its internal authentication storage. This is usually temporary while storage volumes mount, background locks clear, or database maintenance completes.</p>
+  <button class="btn-retry" onclick="window.location.reload()">🔄 Retry Connection</button>
+  {detail_html}
+  <p class="note">🔒 Access to media and administrative functions is paused until storage is restored. No setup or credentials will be exposed.</p>
+</div>
+</body>
+</html>"""
+
+
