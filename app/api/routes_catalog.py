@@ -207,6 +207,7 @@ def movies(
                     PARTITION BY source 
                     ORDER BY 
                         CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC, 
+                        COALESCE(updated_at, 0) DESC,
                         id ASC
                 ) AS src_rank
                 FROM filtered

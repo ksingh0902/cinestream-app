@@ -909,26 +909,38 @@ select:focus {
   display: flex;
 }
 .box {
-  max-width: 1100px;
+  max-width: 880px;
   margin: auto;
   width: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 .player-container {
   position: relative;
   width: 100%;
+  max-width: min(880px, calc((68vh - 60px) * 16 / 9));
+  max-height: 68vh;
   aspect-ratio: 16/9;
   background: #000;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 16px 48px rgba(0,0,0,0.85);
+  margin: 0 auto;
 }
 .player-container:fullscreen,
 .player-container:-webkit-full-screen,
-.player-container:-moz-full-screen {
+.player-container:-moz-full-screen,
+video:fullscreen,
+video:-webkit-full-screen,
+video:-moz-full-screen,
+#p-iframe:fullscreen,
+#p-iframe:-webkit-full-screen,
+#p-iframe:-moz-full-screen {
   width: 100vw !important;
   height: 100vh !important;
   max-width: none !important;
+  max-height: none !important;
   border-radius: 0 !important;
   background: #000 !important;
 }
@@ -983,6 +995,28 @@ button.btn-action:hover {
   border-color: #3e4350;
 }
 button.btn-action:active {
+  transform: scale(0.97);
+}
+button.btn-fullscreen {
+  background: #181c26;
+  border: 1px solid #3b82f6;
+  color: #60a5fa;
+  padding: 7px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12.5px;
+  transition: .15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+button.btn-fullscreen:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: #93c5fd;
+  color: #fff;
+}
+button.btn-fullscreen:active {
   transform: scale(0.97);
 }
 button.btn-close {
@@ -1200,6 +1234,7 @@ footer {
         <button id="btn-rewind" class="btn-action" onclick="handleSkip(-1)" title="Rewind 10s (Left Arrow / Click)">⏪ -10s</button>
         <button id="btn-forward" class="btn-action" onclick="handleSkip(1)" title="Skip Forward 10s (Right Arrow / Click)">⏩ +10s</button>
         <button id="btn-cc" class="btn-action" onclick="toggleCC()" title="Toggle English Subtitles (Press C)">CC: English (ON)</button>
+        <button id="btn-fullscreen" class="btn-action btn-fullscreen" onclick="togglePlayerFullscreen()" title="Fullscreen (Press F)">⛶ Fullscreen</button>
         <button class="btn-close" onclick="closePlayer()" title="Close Player (Escape)">✕ Close</button>
       </div>
     </div>
@@ -1535,9 +1570,29 @@ function toggleCC(){
   showHud(`Subtitles: ${isShowing ? 'OFF' : 'English'}`);
 }
 
+function setIframeSrc(url){
+  if(!pIframe) return;
+  try {
+    if(pIframe.contentWindow && pIframe.contentWindow.location){
+      pIframe.contentWindow.location.replace(url);
+    } else {
+      pIframe.src = url;
+    }
+  } catch(_) {
+    pIframe.src = url;
+  }
+}
+
 async function openPlayer(id){
   curId = id;
   overlay.classList.add('on');
+  updateFullscreenBtn();
+  // Push state to browser history so TV remote Back / Exit button closes the player instead of closing website
+  if(window.location.hash !== '#player'){
+    window.history.pushState({ modal: 'player', id: id }, '', '#player');
+  } else {
+    window.history.replaceState({ modal: 'player', id: id }, '', '#player');
+  }
   document.getElementById('p-title').innerHTML = '<span class="spinner" style="vertical-align:middle;margin-right:8px"></span> Loading…';
   document.getElementById('p-syn').textContent = '';
   const altWrap = document.getElementById('alt-source-wrap');
@@ -1550,7 +1605,7 @@ async function openPlayer(id){
   video.removeAttribute('src'); video.load();
   if(pIframe){
     pIframe.style.display = 'none';
-    pIframe.src = 'about:blank';
+    setIframeSrc('about:blank');
   }
 
   // Clear previous subtitle tracks and attach English track
@@ -1667,7 +1722,7 @@ async function fetchStream(id, fresh = false){
       video.style.display = 'none';
       if(pIframe){
         pIframe.style.display = 'block';
-        pIframe.src = playUrl;
+        setIframeSrc(playUrl);
       }
       const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
       if(rw) rw.style.display = 'none';
@@ -1686,7 +1741,7 @@ async function fetchStream(id, fresh = false){
           btn.textContent = srv.label || `Server ${idx + 1}`;
           btn.style.cssText = 'padding:4px 12px;font-size:12px;cursor:pointer;';
           btn.onclick = () => {
-            pIframe.src = srv.url;
+            setIframeSrc(srv.url);
             srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))} · Active stream player`;
@@ -1701,7 +1756,7 @@ async function fetchStream(id, fresh = false){
       // Native HLS player (YoMovies / Speedostream)
       if(pIframe){
         pIframe.style.display = 'none';
-        pIframe.src = 'about:blank';
+        setIframeSrc('about:blank');
       }
       if(srvBox) srvBox.style.display = 'none';
       video.style.display = 'block';
@@ -1783,8 +1838,12 @@ function attach(url){
   });
 }
 
-function closePlayer(){
+function closePlayer(triggerHistoryBack = true){
   overlay.classList.remove('on');
+  updateFullscreenBtn();
+  if(triggerHistoryBack && window.location.hash === '#player'){
+    window.history.back();
+  }
   if(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement){
     const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen;
     if(ex) ex.call(document).catch(()=>{});
@@ -1796,7 +1855,7 @@ function closePlayer(){
   if(hls){ hls.destroy(); hls = null; }
   if(pIframe){
     pIframe.style.display = 'none';
-    pIframe.src = 'about:blank';
+    setIframeSrc('about:blank');
   }
   const srvBox = document.getElementById('server-switcher');
   if(srvBox){ srvBox.innerHTML = ''; srvBox.style.display = 'none'; }
@@ -1813,22 +1872,100 @@ function closePlayer(){
   if(retryWrap) retryWrap.style.display = 'none';
 }
 
-function toggleAskFullscreen(){
-  const isFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+// History popstate: TV remote hardware "Back" button closes player cleanly without exiting website
+window.addEventListener('popstate', ()=>{
+  if(overlay && overlay.classList.contains('on')){
+    closePlayer(false);
+  }
+});
+
+// Clean any leftover #player hash on page reload
+if(window.location.hash === '#player'){
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
+// Register Samsung Tizen TV remote Back & Exit keys
+try {
+  if (window.tizen && window.tizen.tvinputdevice) {
+    ['Return', 'Exit'].forEach(k => {
+      try { window.tizen.tvinputdevice.registerKey(k); } catch(_) {}
+    });
+  }
+} catch(_) {}
+
+function isBackOrExitKey(e){
+  const k = e.key;
+  const c = e.keyCode || e.which;
+  if(k === 'Escape' || k === 'Back' || k === 'BrowserBack' || k === 'GoBack' || k === 'Exit' || k === 'Return' || k === 'Cancel' || k === 'Uprev'){
+    return true;
+  }
+  // 27: Escape, 4: Android Back, 461: LG webOS Back, 10009: Samsung Tizen Return, 10182: Samsung Tizen Exit, 166: Browser Back
+  if(c === 27 || c === 4 || c === 461 || c === 10009 || c === 10182 || c === 166){
+    return true;
+  }
+  // Backspace key on TV remotes when not actively typing in an input
+  const tag = document.activeElement ? document.activeElement.tagName : '';
+  if((k === 'Backspace' || c === 8) && tag !== 'INPUT' && tag !== 'TEXTAREA'){
+    return true;
+  }
+  return false;
+}
+
+function togglePlayerFullscreen(){
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
   if(isFs){
     const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
     if(ex) ex.call(document).catch(()=>{});
-  } else if(pIframe){
-    const req = pIframe.requestFullscreen || pIframe.webkitRequestFullscreen || pIframe.mozRequestFullScreen || pIframe.msRequestFullscreen;
-    if(req) req.call(pIframe).catch(()=>{});
+  } else {
+    if(pIframe && pIframe.style.display !== 'none'){
+      const req = pIframe.requestFullscreen || pIframe.webkitRequestFullscreen || pIframe.mozRequestFullScreen || pIframe.msRequestFullscreen;
+      if(req) req.call(pIframe).catch(()=>{});
+    } else if(video && video.style.display !== 'none'){
+      const req = video.requestFullscreen || video.webkitRequestFullscreen || video.mozRequestFullScreen || video.msRequestFullscreen || (playerContainer && playerContainer.requestFullscreen);
+      if(req) req.call(video).catch(()=>{});
+    }
   }
 }
+function toggleAskFullscreen(){ togglePlayerFullscreen(); }
+
+function updateFullscreenBtn(){
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  const fsBtn = document.getElementById('btn-fullscreen');
+  if(fsBtn){
+    if(isFs){
+      fsBtn.innerHTML = '🗗 Minimize';
+      fsBtn.setAttribute('title', 'Exit Fullscreen (Escape or F)');
+    } else {
+      fsBtn.innerHTML = '⛶ Fullscreen';
+      fsBtn.setAttribute('title', 'Fullscreen (Press F)');
+    }
+  }
+}
+['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
+  document.addEventListener(evt, updateFullscreenBtn);
+});
 
 /* Pre-empt expiry every 25 min (TTL is 30) */
 setInterval(()=>{ if(curId && overlay.classList.contains('on')) selfHeal(); }, 25*60*1000);
 
 /* Keyboard and Remote Controls */
 window.addEventListener('keydown', (e)=>{
+  // Check Back / Exit key first across all TV remotes (Android, Samsung Tizen, LG webOS, Fire TV)
+  if(isBackOrExitKey(e)){
+    if(overlay && overlay.classList.contains('on')){
+      e.preventDefault();
+      e.stopPropagation();
+      closePlayer();
+      return;
+    }
+    if(searchDropdown && searchDropdown.classList.contains('open')){
+      e.preventDefault();
+      e.stopPropagation();
+      closeDropdown();
+      return;
+    }
+  }
+
   if(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')){
     if(e.key === 'Escape') document.activeElement.blur();
     return;
@@ -1872,15 +2009,7 @@ window.addEventListener('keydown', (e)=>{
   // 'f' / 'F' -> Toggle Fullscreen
   else if(e.key === 'f' || e.key === 'F'){
     e.preventDefault();
-    if(pIframe && pIframe.style.display !== 'none'){
-      toggleAskFullscreen();
-    } else {
-      if(!document.fullscreenElement){
-        video.requestFullscreen().catch(()=>{});
-      } else {
-        document.exitFullscreen().catch(()=>{});
-      }
-    }
+    togglePlayerFullscreen();
   }
   // 'm' / 'M' -> Toggle Mute
   else if(e.key === 'm' || e.key === 'M'){
@@ -1893,12 +2022,7 @@ window.addEventListener('keydown', (e)=>{
     e.preventDefault();
     toggleCC();
   }
-  // Escape -> Close Player
-  else if(e.key === 'Escape'){
-    e.preventDefault();
-    closePlayer();
-  }
-});
+}, true);
 
 /* TV Remote D-Pad Navigation & Smooth Scroll System */
 window._isDpadNavigating = false;

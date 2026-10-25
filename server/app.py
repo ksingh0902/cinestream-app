@@ -21,11 +21,58 @@ from scraper.resolve import StreamResolver
 from scraper.store import connect
 from app.api import catalog_router, stream_router
 
+import asyncio
+import os
+
 app = FastAPI(title="CineMyMovies API")
 app.include_router(catalog_router)
 app.include_router(stream_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
+
+_sync_task: Optional[asyncio.Task] = None
+
+async def _periodic_sync_loop():
+    """Background task that runs on server startup and every 12 hours (daily/bidaily) to fetch newly added movies."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            print("[auto-sync] Running scheduled catalog sync...", flush=True)
+            from app.sync import run_full_sync
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, run_full_sync)
+            print(f"[auto-sync] Scheduled sync finished: {result}", flush=True)
+        except Exception as exc:
+            print(f"[auto-sync] Error during scheduled sync: {exc}", flush=True)
+
+        interval_hours = float(os.getenv("SYNC_INTERVAL_HOURS", "12"))
+        await asyncio.sleep(max(1.0, interval_hours) * 3600)
+
+@app.on_event("startup")
+async def startup_sync_scheduler():
+    global _sync_task
+    if os.getenv("DISABLE_AUTO_SYNC", "0") != "1":
+        _sync_task = asyncio.create_task(_periodic_sync_loop())
+
+@app.on_event("shutdown")
+async def shutdown_sync_scheduler():
+    global _sync_task
+    if _sync_task:
+        _sync_task.cancel()
+
+@app.post("/api/sync/latest")
+async def trigger_sync():
+    """Manual or cron trigger to immediately sync latest movies from Yomovies & Ask4movie."""
+    from app.sync import run_full_sync
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_full_sync)
+    return result
+
+@app.get("/api/sync/status")
+def sync_status():
+    """Check last sync status and timestamp."""
+    from app.sync import get_sync_status
+    return get_sync_status()
 
 @app.middleware("http")
 async def add_no_cache_for_html(request: Request, call_next):
