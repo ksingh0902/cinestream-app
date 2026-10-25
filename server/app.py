@@ -20,13 +20,19 @@ from scraper.http import HttpClient, headers_for
 from scraper.resolve import StreamResolver
 from scraper.store import connect
 from app.api import catalog_router, stream_router
+from app.auth.routes import auth_router
+from app.auth.middleware import PrivateAccessMiddleware
+from app.auth.store import init_auth_db
 
 import asyncio
 import os
 
 app = FastAPI(title="CineMyMovies API")
+app.include_router(auth_router)
 app.include_router(catalog_router)
 app.include_router(stream_router)
+
+app.add_middleware(PrivateAccessMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -50,6 +56,7 @@ async def _periodic_sync_loop():
 
 @app.on_event("startup")
 async def startup_sync_scheduler():
+    init_auth_db()
     global _sync_task
     if os.getenv("DISABLE_AUTO_SYNC", "0") != "1":
         _sync_task = asyncio.create_task(_periodic_sync_loop())

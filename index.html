@@ -122,6 +122,28 @@ select:focus {
   border-color: var(--accent);
   background: var(--card-hover);
 }
+.btn-auth {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--txt);
+  padding: 0 10px;
+  height: 32px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: .15s;
+  white-space: nowrap;
+}
+.btn-auth:hover {
+  background: var(--card-hover);
+  border-color: #3f4452;
+  color: #fff;
+}
 
 .search-wrap {
   position: relative;
@@ -1188,6 +1210,12 @@ footer {
       <button id="btn-density" class="btn-density" onclick="toggleDensity()" title="Toggle cards per row (3 or 2)">
         <span id="density-icon">📱 3</span>
       </button>
+      <a id="btn-admin-link" href="/admin" class="btn-auth" style="display:none;text-decoration:none;font-weight:700;color:#60a5fa;border-color:rgba(59,130,246,0.4)" title="Admin Console">
+        ⚙️ Admin
+      </a>
+      <button id="btn-logout" class="btn-auth" onclick="performLogout()" style="color:#f87171;border-color:rgba(239,68,68,0.3)" title="Sign Out">
+        🚪 Logout
+      </button>
     </div>
   </div>
   <div class="search-wrap">
@@ -1308,6 +1336,55 @@ function toggleDensity(){
 applyDensity(mobileCols);
 
 const esc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+/* Authentication & Session Management */
+const _origFetch = window.fetch;
+window.fetch = async function(...args) {
+  const resp = await _origFetch.apply(this, args);
+  if (resp && resp.status === 401) {
+    const currentPath = window.location.pathname + window.location.search;
+    window.location.replace('/login?next=' + encodeURIComponent(currentPath));
+  }
+  return resp;
+};
+
+function performLogout() {
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/logout';
+  const match = document.cookie.match(new RegExp('(^| )cms_csrf=([^;]+)'));
+  if (match) {
+    const inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = 'csrf_token';
+    inp.value = decodeURIComponent(match[2]);
+    form.appendChild(inp);
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
+async function checkAuthSession() {
+  try {
+    const r = await _origFetch('/api/auth/check');
+    if (r.ok) {
+      const data = await r.json();
+      if (!data.authenticated) {
+        window.location.replace('/login?notice=Session+revoked.+Please+log+in+again.');
+        return;
+      }
+      if (data.role === 'admin') {
+        const adminBtn = document.getElementById('btn-admin-link');
+        if (adminBtn) adminBtn.style.display = 'inline-flex';
+      }
+    } else if (r.status === 401) {
+      window.location.replace('/login?notice=Session+expired.+Please+log+in+again.');
+    }
+  } catch(e) {}
+}
+
+checkAuthSession();
+setInterval(checkAuthSession, 60000);
 
 /* Clicking CineMyMovies title goes to Home page 1, Newly Added */
 function goHome(){
