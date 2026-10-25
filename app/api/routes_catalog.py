@@ -155,7 +155,10 @@ def movies(
         args.extend(sq_params)
 
     if genre:
-        if genre.lower() in ("hindi dubbed", "hollywood dubbed", "dual audio"):
+        if genre.lower() == "bollywood":
+            where.append("(genres LIKE ? OR quality = ? OR title LIKE ?) AND genres NOT LIKE '%\"Punjabi\"%' AND title NOT LIKE '%Punjabi%'")
+            args.extend([f'%"{genre}"%', genre, f"%{genre}%"])
+        elif genre.lower() in ("hindi dubbed", "hollywood dubbed", "dual audio"):
             where.append("(is_hindi_dubbed = 1 OR genres LIKE ? OR quality = ? OR title LIKE ?)")
             args.extend([f'%"{genre}"%', genre, f"%{genre}%"])
         else:
@@ -171,7 +174,7 @@ def movies(
 
     # Ordering:
     if q_str:
-        order = "CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, COALESCE(CAST(year AS INT), 0) DESC, id DESC"
+        order = "CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, CAST(year AS INT) DESC, id ASC"
         query_sql = (
             f"SELECT * FROM movies WHERE {where_clause} "
             f"ORDER BY {order} LIMIT ? OFFSET ?"
@@ -180,34 +183,36 @@ def movies(
     elif sort in ("imdb", "rating"):
         query_sql = (
             f"SELECT * FROM movies WHERE {where_clause} "
-            f"ORDER BY COALESCE(rating, CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL), 0) DESC, COALESCE(CAST(year AS INT), 0) DESC, id DESC "
+            f"ORDER BY COALESCE(rating, CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL), 0) DESC, CAST(year AS INT) DESC, id ASC "
             f"LIMIT ? OFFSET ?"
         )
         query_args = args + [per_page, (page - 1) * per_page]
     elif sort == "title":
         query_sql = (
             f"SELECT * FROM movies WHERE {where_clause} "
-            f"ORDER BY title ASC, COALESCE(CAST(year AS INT), 0) DESC, id DESC "
+            f"ORDER BY title ASC, CAST(year AS INT) DESC, id ASC "
             f"LIMIT ? OFFSET ?"
         )
         query_args = args + [per_page, (page - 1) * per_page]
     else:
         # Default ("recent" / "year"):
-        # Mix newly added titles from both sources (ask4movie and yomovies) on every page,
-        # prioritized by latest release year (2026, 2025, 2024...) and newest added on platform (id DESC).
+        # Interleave sources (ask4movie and yomovies) with the latest released movies on top (e.g. Udta Teer, Gajab Raat),
+        # ordered by year descending and id ascending.
         query_sql = f"""
             WITH filtered AS (
                 SELECT * FROM movies WHERE {where_clause}
             ),
             ranked AS (
                 SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY COALESCE(CAST(year AS INT), 0), source 
-                    ORDER BY id DESC
-                ) AS year_src_rank
+                    PARTITION BY source 
+                    ORDER BY 
+                        CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC, 
+                        id ASC
+                ) AS src_rank
                 FROM filtered
             )
             SELECT * FROM ranked 
-            ORDER BY COALESCE(CAST(year AS INT), 0) DESC, year_src_rank ASC, source ASC 
+            ORDER BY src_rank ASC, source ASC 
             LIMIT ? OFFSET ?
         """
         query_args = args + [per_page, (page - 1) * per_page]
