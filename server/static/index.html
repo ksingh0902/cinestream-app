@@ -23,6 +23,8 @@ html {
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  overflow-y: auto;
+  scroll-behavior: smooth;
 }
 *, *:before, *:after {
   box-sizing: inherit;
@@ -33,6 +35,7 @@ body {
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  min-height: 100vh;
   position: relative;
   background: var(--bg);
   color: var(--txt);
@@ -168,7 +171,7 @@ select:focus {
   background: #ffffff15;
 }
 
-/* Horizontal Category Filter Bar - Strictly Pan X without viewport overflow */
+/* Horizontal Category Filter Bar - Strictly Pan X without blocking vertical scroll */
 .filter-bar {
   display: flex;
   gap: 6px;
@@ -178,7 +181,8 @@ select:focus {
   white-space: nowrap;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
+  touch-action: pan-x pan-y;
+  overscroll-behavior-y: auto;
   align-items: center;
   width: 100%;
   max-width: 100vw;
@@ -456,14 +460,22 @@ select:focus {
   background: var(--card);
   overflow: hidden;
   cursor: pointer;
-  transition: transform .15s, box-shadow .15s;
+  transition: transform .15s, box-shadow .15s, outline .15s;
   display: flex;
   flex-direction: column;
   user-select: none;
+  outline: none;
 }
 .card:hover {
   transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+.card:focus, .card:focus-visible {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 3px;
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(255,123,57,0.45);
+  z-index: 5;
 }
 .card img {
   width: 100%;
@@ -1293,6 +1305,7 @@ function setQuickFilter(kindVal, genreVal, sourceVal = ''){
   if(srcSelect) srcSelect.value = sourceVal;
   page = 1;
   syncFilterPills(kindVal, genreVal, sourceVal);
+  window.scrollTo({top: 0, behavior: 'instant'});
   load();
 }
 
@@ -1303,6 +1316,10 @@ function syncFilterPills(kindVal, genreVal, sourceVal = ''){
     const s = btn.getAttribute('data-source') || '';
     if (k === (kindVal || '') && g === (genreVal || '') && s === (sourceVal || '')) {
       btn.classList.add('active');
+      // Release button focus on click so TV browsers do not anchor/lock viewport scrolling to top
+      if(document.activeElement === btn && !window._isDpadNavigating){
+        btn.blur();
+      }
     } else {
       btn.classList.remove('active');
     }
@@ -1392,7 +1409,7 @@ async function load(){
     (d.items || []).forEach(it => window.movieCache.set(it.id, it));
 
     grid.innerHTML = (d.items || []).map(m=>`
-      <div class="card" onclick="openPlayer(${m.id})">
+      <div class="card" tabindex="0" role="button" aria-label="${esc(m.title)}" data-id="${m.id}" onclick="openPlayer(${m.id})">
         <div class="card-badges">
           ${m.source==='ask4movie'
             ? '<span class="badge badge-ask">🍿 ask</span>'
@@ -1880,6 +1897,171 @@ window.addEventListener('keydown', (e)=>{
   else if(e.key === 'Escape'){
     e.preventDefault();
     closePlayer();
+  }
+});
+
+/* TV Remote D-Pad Navigation & Smooth Scroll System */
+window._isDpadNavigating = false;
+
+// Filter bar mouse wheel vertical passthrough (never blocks page scroll)
+const filterBarEl = document.getElementById('filter-bar');
+if(filterBarEl){
+  filterBarEl.addEventListener('wheel', (e)=>{
+    if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+      window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+    }
+  }, { passive: true });
+}
+
+// Open card on Enter / Space when focused via TV remote or keyboard
+grid.addEventListener('keydown', (e)=>{
+  const card = e.target.closest('.card');
+  if(!card) return;
+  if(e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32){
+    e.preventDefault();
+    const id = card.getAttribute('data-id');
+    if(id) openPlayer(id);
+  }
+});
+
+// Arrow key navigation between pills, cards, and pagination
+window.addEventListener('keydown', (e)=>{
+  // If player modal is open, let player controls handle it
+  if(overlay && overlay.classList.contains('on')) return;
+
+  // If typing in search or selects, do not intercept
+  if(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) return;
+
+  const key = e.key;
+  const isDown = key === 'ArrowDown' || e.keyCode === 40;
+  const isUp = key === 'ArrowUp' || e.keyCode === 38;
+  const isLeft = key === 'ArrowLeft' || e.keyCode === 37;
+  const isRight = key === 'ArrowRight' || e.keyCode === 39;
+
+  if(!isDown && !isUp && !isLeft && !isRight) return;
+
+  window._isDpadNavigating = true;
+  const cards = Array.from(grid.querySelectorAll('.card'));
+  const activeEl = document.activeElement;
+  const isCard = activeEl && activeEl.classList.contains('card');
+  const isPill = activeEl && activeEl.classList.contains('pill');
+  const isPager = activeEl && activeEl.closest('#pager');
+
+  // Case 1: Focus is currently on a Filter Pill
+  if(isPill){
+    if(isDown){
+      e.preventDefault();
+      if(cards.length > 0){
+        cards[0].focus();
+        cards[0].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } else {
+        window.scrollBy({ top: 260, behavior: 'smooth' });
+      }
+    } else if(isRight || isLeft){
+      const pills = Array.from(document.querySelectorAll('.filter-bar .pill'));
+      const idx = pills.indexOf(activeEl);
+      if(idx !== -1){
+        const nextIdx = isRight ? Math.min(pills.length - 1, idx + 1) : Math.max(0, idx - 1);
+        if(nextIdx !== idx){
+          e.preventDefault();
+          pills[nextIdx].focus();
+          pills[nextIdx].scrollIntoView({ inline: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }
+    return;
+  }
+
+  // Case 2: Focus is currently on a Movie Card
+  if(isCard && cards.length > 0){
+    const idx = cards.indexOf(activeEl);
+    if(idx === -1) return;
+
+    // Detect grid columns dynamically
+    let cols = 1;
+    const currentTop = activeEl.offsetTop;
+    for(let i = idx + 1; i < cards.length; i++){
+      if(cards[i].offsetTop > currentTop){
+        cols = i - idx;
+        break;
+      }
+    }
+    if(cols === 1 && idx > 0){
+      const r0 = cards[0].offsetTop;
+      for(let i = 1; i < cards.length; i++){
+        if(cards[i].offsetTop > r0){
+          cols = i;
+          break;
+        }
+      }
+    }
+    if(cols < 1) cols = 4;
+
+    if(isDown){
+      e.preventDefault();
+      const nextIdx = idx + cols;
+      if(nextIdx < cards.length){
+        cards[nextIdx].focus();
+        cards[nextIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } else {
+        // Move focus down to pagination
+        const pagerBtn = pager ? pager.querySelector('button:not([disabled])') : null;
+        if(pagerBtn){
+          pagerBtn.focus();
+          pagerBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          window.scrollBy({ top: 300, behavior: 'smooth' });
+        }
+      }
+    } else if(isUp){
+      e.preventDefault();
+      const prevIdx = idx - cols;
+      if(prevIdx >= 0){
+        cards[prevIdx].focus();
+        cards[prevIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } else {
+        // Scroll to top and focus the active filter pill
+        const activePill = document.querySelector('.filter-bar .pill.active') || document.querySelector('.filter-bar .pill');
+        if(activePill){
+          activePill.focus();
+          activePill.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else if(isRight){
+      e.preventDefault();
+      if(idx + 1 < cards.length){
+        cards[idx + 1].focus();
+        cards[idx + 1].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    } else if(isLeft){
+      e.preventDefault();
+      if(idx - 1 >= 0){
+        cards[idx - 1].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+    return;
+  }
+
+  // Case 3: Focus is on Pager
+  if(isPager && isUp){
+    e.preventDefault();
+    if(cards.length > 0){
+      const lastCard = cards[cards.length - 1];
+      lastCard.focus();
+      lastCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    return;
+  }
+
+  // Case 4: No card/pill focused (body or container focused)
+  // Ensure TV remote arrow down / up smoothly scrolls the page
+  if(!activeEl || activeEl === document.body || activeEl === document.documentElement){
+    if(isDown){
+      window.scrollBy({ top: 260, behavior: 'smooth' });
+    } else if(isUp){
+      window.scrollBy({ top: -260, behavior: 'smooth' });
+    }
   }
 });
 
