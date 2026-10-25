@@ -5,6 +5,10 @@ import os
 import secrets
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from config import DB_PATH
 
 logger = logging.getLogger("cinemymovies.auth")
