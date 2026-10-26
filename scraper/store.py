@@ -31,25 +31,33 @@ def connect(path: str = "yomovies.db") -> sqlite3.Connection:
 
 
 def upsert(con, m: Dict) -> None:
-    row = {
-        "slug": (m.get("url") or "").rstrip("/").rsplit("/", 1)[-1] or None,
-        "url": m.get("url"), "title": m.get("title"), "year": m.get("year"),
-        "duration": m.get("duration"), "duration_s": m.get("duration_s"),
-        "quality": m.get("quality"), "imdb": m.get("imdb"),
-        "genres": json.dumps(m.get("genres") or []),
-        "actors": json.dumps(m.get("actors") or []),
-        "director": json.dumps(m.get("director") or []),
-        "country": json.dumps(m.get("country") or []),
-        "poster": m.get("poster"), "synopsis": m.get("synopsis"),
-        "is_series": int(m.get("is_series") or 0),
-        "embeds": json.dumps(m.get("embeds") or []),
-        "downloads": json.dumps(m.get("downloads") or []),
-        "updated_at": m.get("updated_at"),
+    columns = {item[1] for item in con.execute("PRAGMA table_info(movies)")}
+    slug = (m.get("url") or "").rstrip("/").rsplit("/", 1)[-1] or None
+    row = {"slug": slug, "url": m.get("url")}
+    scalar_fields = ("title", "year", "duration", "duration_s", "quality", "imdb", "poster", "synopsis", "updated_at")
+    json_fields = ("genres", "actors", "director", "country", "embeds", "downloads")
+    for key in scalar_fields:
+        if key in m:
+            row[key] = m.get(key)
+    for key in json_fields:
+        if key in m:
+            row[key] = json.dumps(m.get(key) or [])
+    if "is_series" in m:
+        row["is_series"] = int(m.get("is_series") or 0)
+    unified = {
+        "source": "yomovies", "source_id": slug,
+        "poster_url": m.get("poster"), "detail_url": m.get("url"),
+        "player_kind": "hls",
     }
+    if "is_hindi_dubbed" in m:
+        unified["is_hindi_dubbed"] = int(m.get("is_hindi_dubbed") or 0)
+    row.update({key: value for key, value in unified.items() if key in columns})
+    row = {key: value for key, value in row.items() if key in columns}
     cols = ", ".join(row); ph = ", ".join("?" * len(row))
     upd = ", ".join(f"{c}=excluded.{c}" for c in row if c != "url")
+    conflict_target = "source,source_id" if {"source", "source_id"}.issubset(columns) else "url"
     con.execute(f"INSERT INTO movies ({cols}) VALUES ({ph}) "
-                f"ON CONFLICT(url) DO UPDATE SET {upd}", list(row.values()))
+                f"ON CONFLICT({conflict_target}) DO UPDATE SET {upd}", list(row.values()))
     con.commit()
 
 

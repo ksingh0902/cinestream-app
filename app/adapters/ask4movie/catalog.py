@@ -43,6 +43,8 @@ def parse_listing(html: str) -> list[MediaItem]:
         is_series = bool("/watch/tv-" in href)
         img = a.select_one("img.bf-card__img") or a.select_one("img")
         poster = img.get("src") if img else None
+        if poster and ("logo.png" in poster or poster.startswith("/assets/")):
+            poster = None
 
         genre_el = a.select_one(".bf-card__genre")
         raw_genres = genre_el.get_text(strip=True) if genre_el else ""
@@ -99,7 +101,7 @@ def parse_listing(html: str) -> list[MediaItem]:
             year=year,
             rating=rating,
             tmdb_id=int(m.group("tmdb")),
-            poster_url=(urljoin(_base(), img["src"]) if img and img.get("src") else None),
+            poster_url=(urljoin(_base(), img["src"]) if img and img.get("src") and "logo.png" not in img.get("src") and not img.get("src").startswith("/assets/") else None),
             detail_url=href,
             is_series=is_series,
             player_kind="iframe",

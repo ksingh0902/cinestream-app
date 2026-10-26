@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Optional
 
@@ -13,6 +14,64 @@ from ..adapters.ask4movie.sync import connect
 router = APIRouter()
 
 
+def _normalized_title(title: str | None) -> str:
+    value = (title or "").lower()
+    value = re.sub(r"\s*[\[(]\s*(?:19|20)\d{2}\s*[\])]", " ", value)
+    value = re.sub(r"\s+(?:19|20)\d{2}\s*$", " ", value)
+    value = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual[ -]?audio|english dubbed|english|hindi)\b", " ", value)
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+def _audio_edition(item: dict) -> str:
+    text = " ".join(str(item.get(key) or "").lower() for key in ("title", "genres", "quality", "language", "language_code"))
+    if "dual audio" in text or "dual-audio" in text:
+        return "dual_audio"
+    if item.get("is_hindi_dubbed") or any(marker in text for marker in ("hindi dubbed", "hollywood dubbed", "unofficial dubbed")):
+        return "hindi_dubbed"
+    code = str(item.get("language_code") or "").lower().strip()
+    language = str(item.get("language") or "").lower()
+    if code in ("hi", "hin") or "hindi" in language:
+        return "hindi"
+    if code in ("en", "eng") or "english" in language:
+        return "english"
+    return "unknown"
+
+
+def _source_priority(source: str | None, edition: str) -> int:
+    order = (("yomovies", "dooflix", "ask4movie") if edition in ("hindi", "hindi_dubbed", "dual_audio") else ("yomovies", "ask4movie", "dooflix"))
+    try:
+        return order.index(source or "")
+    except ValueError:
+        return len(order)
+
+
+def _edition_key(item: dict) -> tuple[str, str, str]:
+    return (_normalized_title(item.get("title")), str(item.get("year") or ""), _audio_edition(item))
+
+
+def _group_ordered_editions(items: list[dict]) -> list[dict]:
+    ordered_keys: list[tuple[str, str, str]] = []
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for item in items:
+        key = _edition_key(item)
+        if not key[0]:
+            key = (f"id:{item.get('id')}", key[1], key[2])
+        if key not in groups:
+            ordered_keys.append(key)
+            groups[key] = []
+        groups[key].append(item)
+    grouped = []
+    for key in ordered_keys:
+        candidates = groups[key]
+        edition = key[2]
+        candidates.sort(key=lambda row: (_source_priority(row.get("source"), edition), -(row.get("updated_at") or 0), row.get("id") or 0))
+        primary = candidates[0]
+        primary["audio_edition"] = edition
+        primary["available_source_count"] = len({row.get("source") for row in candidates})
+        grouped.append(primary)
+    return grouped
+
+
 @router.get("/api/sources")
 def sources():
     """R12: Report each adapter's status, items count, and player kind."""
@@ -21,6 +80,12 @@ def sources():
 
 def _format_row(row: dict) -> dict:
     d = dict(row)
+    # Sanitize invalid dummy posters (e.g. Ask4Movie logo.png placeholders or relative assets)
+    for k in ("poster", "poster_url"):
+        val = str(d.get(k) or "").strip()
+        if not val or "logo.png" in val or val.startswith("/assets/") or val in ("None", "null"):
+            d[k] = None
+
     # Ensure poster_url and poster are populated
     if not d.get("poster_url") and d.get("poster"):
         d["poster_url"] = d["poster"]
@@ -57,27 +122,85 @@ def _format_row(row: dict) -> dict:
 
 
 ADULT_EXCLUSION_SQL = (
-    "quality != '18+' AND (quality NOT LIKE '%18+%' OR quality IS NULL) "
-    "AND (genres NOT LIKE '%\"Erotic Movies\"%' OR genres IS NULL) "
-    "AND title NOT LIKE '%(Ullu%' "
-    "AND title NOT LIKE '%(PrimeShots%' "
+    "(genres NOT LIKE '%\"Erotic Movies\"%' OR genres IS NULL) "
+    "AND (genres NOT LIKE '%\"Erotic\"%' OR genres IS NULL) "
+    "AND (genres NOT LIKE '%\"Hot Series\"%' OR genres IS NULL) "
+    "AND (url NOT LIKE '%/genre/erotic-movies/%' OR url IS NULL) "
+    "AND (url NOT LIKE '%/genre/hot-series/%' OR url IS NULL) "
+    "AND (url NOT LIKE '%/hot-series/%' OR url IS NULL) "
+    "AND title NOT LIKE '%Erotic%' "
+    "AND title NOT LIKE '%Hot Series%' "
+    "AND title NOT LIKE '%Hot Web Series%' "
+    "AND title NOT LIKE '%Ullu%' "
+    "AND title NOT LIKE '%Altbalaji%' "
+    "AND title NOT LIKE '%Alt Balaji%' "
+    "AND title NOT LIKE '%WOOW%' "
+    "AND title NOT LIKE '%PrimePlay%' "
+    "AND title NOT LIKE '%Prime Play%' "
+    "AND title NOT LIKE '%Nuefliks%' "
+    "AND title NOT LIKE '%MoodX%' "
+    "AND title NOT LIKE '%Besharams%' "
+    "AND title NOT LIKE '%Feneomovies%' "
+    "AND title NOT LIKE '%Feneo%' "
+    "AND title NOT LIKE '%Gemplex%' "
+    "AND title NOT LIKE '%BoomMovies%' "
+    "AND title NOT LIKE '%Boom Movies%' "
+    "AND title NOT LIKE '%Night Show%' "
+    "AND title NOT LIKE '%Hootzy%' "
+    "AND title NOT LIKE '%Bambooflix%' "
+    "AND title NOT LIKE '%Eightshots%' "
+    "AND title NOT LIKE '%Eight Shots%' "
+    "AND title NOT LIKE '%BananaPrime%' "
+    "AND title NOT LIKE '%Banana Prime%' "
+    "AND title NOT LIKE '%Chikooflix%' "
+    "AND title NOT LIKE '%Cinemadosti%' "
+    "AND title NOT LIKE '%CliffMovies%' "
+    "AND title NOT LIKE '%Flixsksmovies%' "
+    "AND title NOT LIKE '%Balloons%' "
+    "AND title NOT LIKE '%Piliflix%' "
+    "AND title NOT LIKE '%I-Entertainment%' "
+    "AND title NOT LIKE '%HotHit%' "
+    "AND title NOT LIKE '%Glamheart%' "
+    "AND title NOT LIKE '%Fliz Movies%' "
+    "AND title NOT LIKE '%FlizMovies%' "
+    "AND title NOT LIKE '%(Fliz%' "
+    "AND title NOT LIKE '% Fliz%' "
     "AND title NOT LIKE '%(Hunters%' "
-    "AND title NOT LIKE '%(WOOW%' "
-    "AND title NOT LIKE '%(HuntCinema%' "
-    "AND title NOT LIKE '%(Mastiplay%' "
-    "AND title NOT LIKE '%(BulbulPlay%' "
-    "AND title NOT LIKE '%(Besharams%' "
-    "AND title NOT LIKE '%(Kaddu%' "
-    "AND title NOT LIKE '%(DesiPrime%' "
-    "AND title NOT LIKE '%(Hotshots%' "
-    "AND title NOT LIKE '%(MoodX%' "
-    "AND title NOT LIKE '%(Voovi%' "
-    "AND title NOT LIKE '%(Chikooflix%' "
-    "AND title NOT LIKE '%(Bigshots%' "
-    "AND title NOT LIKE '%(Atrangii%' "
-    "AND title NOT LIKE '%(Altbalaji%' "
-    "AND title NOT LIKE '%(Jugnutv%' "
-    "AND title NOT LIKE '%(Rabbit%'"
+    "AND title NOT LIKE '%Hunters Original%' "
+    "AND title NOT LIKE '%Hunters App%' "
+    "AND title NOT LIKE '%Gupchup%' "
+    "AND title NOT LIKE '%Primeflix%' "
+    "AND title NOT LIKE '%HotMasti%' "
+    "AND title NOT LIKE '%MastiPrime%' "
+    "AND title NOT LIKE '%Lootlo%' "
+    "AND title NOT LIKE '%Big Movie Zoo%' "
+    "AND title NOT LIKE '%11upmovies%' "
+    "AND title NOT LIKE '%Hotprime%' "
+    "AND title NOT LIKE '%Worldprime%' "
+    "AND title NOT LIKE '%PrimeShots%' "
+    "AND title NOT LIKE '%Prime Shots%' "
+    "AND title NOT LIKE '%Hotshots%' "
+    "AND title NOT LIKE '%HotX%' "
+    "AND title NOT LIKE '%VooVi%' "
+    "AND title NOT LIKE '%Voovi%' "
+    "AND title NOT LIKE '%Kooku%' "
+    "AND title NOT LIKE '%(Rabbit%' "
+    "AND title NOT LIKE '%Rabbit Original%' "
+    "AND title NOT LIKE '%Rabbit Movies%' "
+    "AND title NOT LIKE '%Cineprime%' "
+    "AND title NOT LIKE '%Cine Prime%' "
+    "AND title NOT LIKE '%RedPrime%' "
+    "AND title NOT LIKE '%Red Prime%' "
+    "AND title NOT LIKE '%Feelit%' "
+    "AND title NOT LIKE '%Yessma%' "
+    "AND title NOT LIKE '%Jalva%' "
+    "AND title NOT LIKE '%HuntCinema%' "
+    "AND title NOT LIKE '%Mastiplay%' "
+    "AND title NOT LIKE '%BulbulPlay%' "
+    "AND title NOT LIKE '%Kaddu%' "
+    "AND title NOT LIKE '%DesiPrime%' "
+    "AND title NOT LIKE '%Atrangii%' "
+    "AND title NOT LIKE '%Jugnutv%'"
 )
 
 COMMON_SYNONYMS = {
@@ -135,18 +258,11 @@ def movies(
     if series is not None:
         where.append("is_series = ?")
         args.append(series)
-    elif source == "yomovies":
-        where.append("is_series = 0")
-    elif not source:
-        # Yomovies inside global view shows only movies, while other sources show both
-        where.append("(source != 'yomovies' OR is_series = 0)")
 
     if source:
         where.append("source = ?")
         args.append(source)
-    else:
-        # Global view excludes adult content from Yomovies
-        where.append(f"(source != 'yomovies' OR ({ADULT_EXCLUSION_SQL}))")
+    where.append(f"({ADULT_EXCLUSION_SQL})")
 
     q_str = (q or "").strip()
     if q_str:
@@ -220,9 +336,18 @@ def movies(
 
     with connect() as conn:
         conn.row_factory = sqlite3.Row
-        total = conn.execute(count_sql, args).fetchone()[0]
-        raw_rows = conn.execute(query_sql, query_args).fetchall()
-        rows = [_format_row(dict(r)) for r in raw_rows]
+        if source:
+            total = conn.execute(count_sql, args).fetchone()[0]
+            raw_rows = conn.execute(query_sql, query_args).fetchall()
+            rows = [_format_row(dict(r)) for r in raw_rows]
+        else:
+            ordered_sql = query_sql.rsplit("LIMIT ? OFFSET ?", 1)[0]
+            ordered_args = query_args[:-2]
+            raw_rows = conn.execute(ordered_sql, ordered_args).fetchall()
+            grouped = _group_ordered_editions([_format_row(dict(r)) for r in raw_rows])
+            total = len(grouped)
+            offset = (page - 1) * per_page
+            rows = grouped[offset:offset + per_page]
 
     return {"total": total, "page": page, "per_page": per_page, "items": rows}
 
@@ -237,18 +362,268 @@ def movie(movie_id: int):
 
     d = _format_row(dict(row))
 
-    # Cross-source dedupe view (R14): check if same title + year exists on another source
-    raw_title = d.get("title") or ""
-    import re
-    clean_title = re.sub(r'\s*\(\d{4}\).*', '', raw_title).strip()
-    if clean_title:
+    title_key = _normalized_title(d.get("title"))
+    current_edition = _audio_edition(d)
+    d["audio_edition"] = current_edition
+    if title_key:
         with connect() as conn:
             conn.row_factory = sqlite3.Row
-            alts = conn.execute(
-                "SELECT id, source, title, year, player_kind, is_hindi_dubbed FROM movies "
-                "WHERE (title = ? OR title LIKE ? OR title LIKE ?) AND id != ? LIMIT 3",
-                (clean_title, f"{clean_title} (%", f"{clean_title}%", movie_id),
+            candidates = conn.execute(
+                f"SELECT * FROM movies WHERE COALESCE(CAST(year AS TEXT), '') = ? AND id != ? AND ({ADULT_EXCLUSION_SQL})",
+                (str(d.get("year") or ""), movie_id),
             ).fetchall()
-            d["also_available_on"] = [dict(a) for a in alts]
+        matches = [_format_row(dict(row)) for row in candidates if _normalized_title(dict(row).get("title")) == title_key]
+        same_edition = [row for row in matches if _audio_edition(row) == current_edition]
+        same_edition.sort(key=lambda row: (_source_priority(row.get("source"), current_edition), row.get("id") or 0))
+        d["available_sources"] = same_edition
+        d["also_available_on"] = same_edition
+        other_groups: dict[str, list[dict]] = {}
+        for row in matches:
+            edition = _audio_edition(row)
+            if edition != current_edition:
+                other_groups.setdefault(edition, []).append(row)
+        d["other_editions"] = []
+        for edition, edition_rows in other_groups.items():
+            edition_rows.sort(key=lambda row: (_source_priority(row.get("source"), edition), row.get("id") or 0))
+            representative = edition_rows[0]
+            representative["audio_edition"] = edition
+            representative["available_source_count"] = len({row.get("source") for row in edition_rows})
+            d["other_editions"].append(representative)
 
     return d
+
+
+TMDB_SEASONS_CACHE: dict[str, dict] = {}
+
+
+def _get_clean_series_name(title: str) -> str:
+    clean = re.sub(r"\s*\(?(?:19|20)\d{2}\)?", " ", title or "")
+    clean = re.sub(r"\bSeason\s*\d+.*", " ", clean, flags=re.I)
+    clean = re.sub(r"\bS\d{1,2}\s*E\d{1,3}.*", " ", clean, flags=re.I)
+    clean = re.sub(r"\bEpisode\s*[\d\-]+.*", " ", clean, flags=re.I)
+    clean = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual audio|english dubbed|netflix|amazon prime|hotstar specials|unofficial dubbed)\b.*", " ", clean, flags=re.I)
+    return re.sub(r"\s+", " ", clean).strip()
+
+
+def _lookup_tmdb_tv_id(title: str, year: str | None = None) -> str | None:
+    import httpx
+    clean = _get_clean_series_name(title)
+    if not clean:
+        return None
+    # Do NOT pass first_air_date_year when searching for TV series because scraped titles
+    # reflect the current season release year rather than the show's original debut year
+    params = {"api_key": "15d2ea6d0dc1d476efbca3eba2b9bbfb", "query": clean}
+    try:
+        r = httpx.get("https://api.tmdb.org/3/search/tv", params=params, timeout=5)
+        if r.status_code == 200:
+            res = r.json().get("results") or []
+            if res:
+                clean_lower = clean.lower()
+                for item in res:
+                    if (item.get("name") or "").lower() == clean_lower:
+                        return str(item["id"])
+                res.sort(key=lambda x: x.get("popularity", 0), reverse=True)
+                return str(res[0]["id"])
+    except Exception:
+        pass
+    return None
+
+
+@router.get("/api/series/{movie_id}/seasons")
+def series_seasons(movie_id: int):
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM movies WHERE id = ?", (movie_id,)).fetchone()
+
+    if not row:
+        raise HTTPException(404, "not found")
+
+    title = row["title"] or ""
+    is_series = bool(row["is_series"]) or bool(
+        re.search(r"\b(?:season|episode|s\d{1,2}e\d{1,3})\b", title, re.I)
+    )
+    if not is_series:
+        return {"is_series": False, "seasons": []}
+
+    clean_name = _get_clean_series_name(title) or title
+    tmdb_id = row["tmdb_id"]
+
+    # Parse current season / episode from the row's title
+    cur_s_m = re.search(r"\bSeason\s*(\d+)\b", title, re.I)
+    cur_e_m = re.search(r"\bEpisode\s*(\d+)\b", title, re.I)
+    current_season = int(cur_s_m.group(1)) if cur_s_m else 1
+    current_episode = int(cur_e_m.group(1)) if cur_e_m else 1
+
+    # Find sibling rows in database (excluding adult/erotic)
+    db_episodes = {}
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        query = f"SELECT id, title, source, tmdb_id FROM movies WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL}) ORDER BY id ASC"
+        siblings = conn.execute(query, (f"{clean_name}%",)).fetchall()
+        for sib in siblings:
+            s_m = re.search(r"\bSeason\s*(\d+)\b", sib["title"] or "", re.I)
+            e_m = re.search(r"\bEpisode\s*(\d+)\b", sib["title"] or "", re.I)
+            s_num = int(s_m.group(1)) if s_m else 1
+            e_num = int(e_m.group(1)) if e_m else 1
+            if not tmdb_id and sib["tmdb_id"]:
+                tmdb_id = sib["tmdb_id"]
+            db_episodes[(s_num, e_num)] = dict(sib)
+
+    if not tmdb_id:
+        tmdb_id = _lookup_tmdb_tv_id(clean_name, str(row["year"] or ""))
+        if tmdb_id:
+            try:
+                with connect() as conn:
+                    conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
+                    conn.commit()
+            except Exception:
+                pass
+
+    seasons = []
+
+    # If TMDB ID is available, fetch full season & episode hierarchy from TMDB TV API
+    if tmdb_id:
+        tid_str = str(tmdb_id)
+        tmdb_data = TMDB_SEASONS_CACHE.get(tid_str)
+        if not tmdb_data:
+            import httpx
+            try:
+                r = httpx.get(
+                    f"https://api.tmdb.org/3/tv/{tid_str}",
+                    params={"api_key": "15d2ea6d0dc1d476efbca3eba2b9bbfb"},
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    tmdb_data = r.json()
+                    TMDB_SEASONS_CACHE[tid_str] = tmdb_data
+            except Exception:
+                pass
+
+        if tmdb_data and "seasons" in tmdb_data:
+            raw_seasons = [
+                s for s in tmdb_data["seasons"]
+                if s.get("season_number", 0) > 0 or len(tmdb_data["seasons"]) == 1
+            ]
+            raw_seasons.sort(key=lambda s: s.get("season_number", 1))
+            for s_info in raw_seasons:
+                s_num = s_info.get("season_number", 1)
+                ep_cnt = s_info.get("episode_count", 0)
+                ep_list = []
+                for ep_idx in range(1, ep_cnt + 1):
+                    db_sib = db_episodes.get((s_num, ep_idx))
+                    ep_list.append({
+                        "episode_number": ep_idx,
+                        "name": f"Episode {ep_idx}",
+                        "s": s_num,
+                        "e": ep_idx,
+                        "movie_id": db_sib["id"] if db_sib else movie_id,
+                    })
+                seasons.append({
+                    "season_number": s_num,
+                    "name": s_info.get("name") or f"Season {s_num}",
+                    "episode_count": ep_cnt,
+                    "episodes": ep_list,
+                })
+
+    # If TMDB had no seasons, build structure from database episodes
+    if not seasons and db_episodes:
+        grouped = {}
+        for (s_num, e_num), sib in db_episodes.items():
+            grouped.setdefault(s_num, []).append((e_num, sib))
+
+        for s_num in sorted(grouped.keys()):
+            ep_items = grouped[s_num]
+            ep_items.sort(key=lambda x: x[0])
+            ep_list = []
+            for e_num, sib in ep_items:
+                ep_list.append({
+                    "episode_number": e_num,
+                    "name": f"Episode {e_num}",
+                    "s": s_num,
+                    "e": e_num,
+                    "movie_id": sib["id"],
+                })
+            seasons.append({
+                "season_number": s_num,
+                "name": f"Season {s_num}",
+                "episode_count": len(ep_list),
+                "episodes": ep_list,
+            })
+
+    # Guarantee that current_season is ALWAYS present in seasons for any series
+    if is_series and current_season and not any(s["season_number"] == current_season for s in seasons):
+        cur_season_eps = []
+        for (s_num, e_num), sib in db_episodes.items():
+            if s_num == current_season and re.search(r"\bEpisode\s*\d+", sib.get("title") or "", re.I):
+                cur_season_eps.append((e_num, sib))
+
+        ep_list = []
+        if cur_season_eps:
+            cur_season_eps.sort(key=lambda x: x[0])
+            for e_num, sib in cur_season_eps:
+                ep_list.append({
+                    "episode_number": e_num,
+                    "name": f"Episode {e_num}",
+                    "s": current_season,
+                    "e": e_num,
+                    "movie_id": sib["id"],
+                })
+        else:
+            # Check if title specifies an episode range (e.g. Episode 1-8)
+            ep_match = re.search(r"\bEpisode\s*(\d+)(?:\s*-\s*(\d+))?\b", title, re.I)
+            if ep_match and ep_match.group(2):
+                start_ep = int(ep_match.group(1))
+                end_ep = int(ep_match.group(2))
+                for idx in range(start_ep, end_ep + 1):
+                    ep_list.append({
+                        "episode_number": idx,
+                        "name": f"Episode {idx}",
+                        "s": current_season,
+                        "e": idx,
+                        "movie_id": movie_id,
+                    })
+            else:
+                prev_counts = [s["episode_count"] for s in seasons if s.get("episode_count")]
+                fallback_count = prev_counts[-1] if prev_counts else max(current_episode, 8)
+                fallback_count = max(fallback_count, current_episode, 8)
+                for idx in range(1, fallback_count + 1):
+                    ep_list.append({
+                        "episode_number": idx,
+                        "name": f"Episode {idx}",
+                        "s": current_season,
+                        "e": idx,
+                        "movie_id": movie_id,
+                    })
+
+        seasons.append({
+            "season_number": current_season,
+            "name": f"Season {current_season}",
+            "episode_count": len(ep_list),
+            "episodes": ep_list,
+        })
+        seasons.sort(key=lambda s: s["season_number"])
+
+    # Fallback single season for series with no sibling rows / no TMDB matches
+    if not seasons and is_series:
+        s_target = current_season or 1
+        e_target = current_episode or 1
+        seasons.append({
+            "season_number": s_target,
+            "name": f"Season {s_target}",
+            "episode_count": 1,
+            "episodes": [{
+                "episode_number": e_target,
+                "name": f"Episode {e_target}",
+                "s": s_target,
+                "e": e_target,
+                "movie_id": movie_id,
+            }],
+        })
+
+    return {
+        "is_series": True,
+        "title": clean_name or title,
+        "current_season": current_season,
+        "current_episode": current_episode,
+        "seasons": seasons,
+    }

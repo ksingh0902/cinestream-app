@@ -92,22 +92,77 @@ def parse_player(html: str, page_url: str) -> StreamInfo | None:
                 t_val = m_t.group(1) if m_t else "movie"
                 slug_val = m_slug.group(1)
 
-                dest_urls = []
-                for x in range(5):
-                    go_url = f"{_base()}/api/go?t={t_val}&slug={slug_val}&x={x}"
+                from urllib.parse import urlparse
+                parsed_p = urlparse(page_url)
+                page_origin = f"{parsed_p.scheme}://{parsed_p.netloc}" if parsed_p.scheme and parsed_p.netloc else _base()
+
+                pill_labels = {}
+                for pill in soup.select(".opt-pill"):
+                    pv = pill.get("value")
+                    pt = pill.get_text(" ", strip=True)
+                    if pv is not None and pt:
+                        pill_labels[str(pv)] = pt
+
+                dest_urls: list[dict[str, str]] = []
+                for x in range(8):
+                    go_url = f"{page_origin}/api/go?t={t_val}&slug={slug_val}&x={x}"
                     try:
                         r_go = get(go_url)
                         m_dest = re.search(r'url=(https?://[^"\'>\s]+)', r_go.text)
                         if m_dest:
                             clean_u = m_dest.group(1).replace("&amp;", "&")
-                            if clean_u not in dest_urls:
-                                dest_urls.append(clean_u)
+                            if clean_u not in [d["url"] for d in dest_urls]:
+                                name = pill_labels.get(str(x), "")
+                                dest_urls.append({"raw_name": name, "url": clean_u})
                     except Exception:
                         pass
 
                 if dest_urls:
-                    servers = [{"label": f"Server {i+1}", "url": u} for i, u in enumerate(dest_urls)]
-                    return StreamInfo(kind="iframe", url=dest_urls[0], servers=servers)
+                    def _rank(item: dict[str, str]) -> int:
+                        u = item["url"].lower()
+                        name = (item.get("raw_name") or "").lower()
+                        if "vidsrc.si" in u or "vip" in name:
+                            return 0
+                        if "vidfast" in u:
+                            return 1
+                        if "vidup" in u:
+                            return 2
+                        if "vidrock" in u:
+                            return 3
+                        if "123embed" in u:
+                            return 4
+                        if "2embed" in u:
+                            return 5
+                        if "vidsrc.mov" in u or "vidsrc.fyi" in u:
+                            return 6
+                        return 7
+
+                    dest_urls.sort(key=_rank)
+
+                    servers = []
+                    for i, d in enumerate(dest_urls):
+                        u = d["url"]
+                        u_lower = u.lower()
+                        raw_name = d.get("raw_name", "")
+                        if "vidsrc.si" in u_lower or "vip" in raw_name.lower():
+                            lbl = f"Server {i+1} (VIP - No ADS)"
+                        elif "vidfast" in u_lower:
+                            lbl = f"Server {i+1} (Fast UI - HD)"
+                        elif "vidup" in u_lower:
+                            lbl = f"Server {i+1} (VidUp - Multi)"
+                        elif "vidrock" in u_lower:
+                            lbl = f"Server {i+1} (VidRock)"
+                        elif "vidsrc.mov" in u_lower:
+                            lbl = f"Server {i+1} (VidSrc - Mov)"
+                        elif "vidsrc.fyi" in u_lower:
+                            lbl = f"Server {i+1} (VidSrc - Fast)"
+                        elif raw_name:
+                            lbl = f"Server {i+1} ({raw_name})"
+                        else:
+                            lbl = f"Server {i+1}"
+                        servers.append({"label": lbl, "url": u})
+
+                    return StreamInfo(kind="iframe", url=servers[0]["url"], servers=servers)
 
     # 2. Any iframe that is not a tracker / self-reference
     for ifr in soup.find_all("iframe"):

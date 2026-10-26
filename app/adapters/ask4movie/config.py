@@ -11,7 +11,7 @@ class Config:
         default_factory=lambda: _list("A4M_MIRRORS", "https://ask4movietv.cyou"))
     # --- streaming host (has the player) ---
     stream_mirrors: list[str] = field(
-        default_factory=lambda: _list("FBOX_MIRRORS", "https://fbox.gd"))
+        default_factory=lambda: _list("FBOX_MIRRORS", "https://flixfever.cyou,https://fbox.gd"))
 
     db_path: str = os.getenv("DB_PATH", "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db")
     delay: float = float(os.getenv("CRAWL_DELAY", "0.6"))

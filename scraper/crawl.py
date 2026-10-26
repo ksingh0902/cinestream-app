@@ -5,23 +5,32 @@ import time
 from typing import Iterator
 
 from config import CRAWL_DELAY, SITE_MIRRORS
-from .extract import parse_listing, parse_pagination, parse_detail
+from .extract import parse_listing, parse_pagination, parse_detail, is_erotic_content
 from .http import HttpClient
 from .store import connect, upsert, set_meta
 
 SEEDS = [
+    "/series/", "/genre/top-rated/",
     "/genre/bollywood/", "/genre/hollywood/", "/genre/hollywood-dubbed/",
     "/genre/south-special/", "/genre/dual-audio/", "/genre/web-series/",
-    "/genre/tv-shows/", "/genre/erotic-movies/", "/genre/action/",
+    "/genre/tv-shows/", "/genre/action/",
     "/genre/comedy/", "/genre/drama/", "/genre/thriller/", "/genre/horror/",
     "/genre/animation/", "/genre/romantic/", "/genre/crime/",
     "/genre/science-fiction/", "/genre/fantasy/", "/genre/mystery/",
     "/genre/adventure/", "/genre/family/", "/genre/history/",
     "/genre/biography/", "/genre/music/", "/genre/sport/", "/genre/war/",
-    "/genre/top-rated/", "/genre/unofficial-dubbed/", "/genre/bengali/",
+    "/genre/unofficial-dubbed/", "/genre/bengali/",
     "/genre/tamil/", "/genre/telugu/", "/genre/malayalam/", "/genre/kannada/",
     "/genre/marathi/", "/genre/gujarati/", "/genre/punjabi/",
 ] + [f"/release-year/{y}/" for y in range(2026, 1949, -1)]
+
+
+def is_allowed_title(card: dict) -> bool:
+    """Strictly reject erotic/softcore webseries and channels (Ullu, AltBalaji, etc.)
+
+    while allowing mainstream 18+ titles (Game of Thrones, Person of Interest, etc.).
+    """
+    return not is_erotic_content(card)
 
 
 def pick_base(http: HttpClient) -> str:
@@ -63,6 +72,8 @@ def crawl(db: str = "yomovies.db", *, delay: float = CRAWL_DELAY,
     targets, seen = [], set()
     for seed in SEEDS:
         for card in _pages(http, base, seed, max_pages):
+            if not is_allowed_title(card):
+                continue
             if card["url"] in seen:
                 continue
             seen.add(card["url"]); targets.append(card["url"])
@@ -78,6 +89,14 @@ def crawl(db: str = "yomovies.db", *, delay: float = CRAWL_DELAY,
     for url in targets:
         if max_detail and done >= max_detail:
             break
+        existing = con.execute(
+            "SELECT synopsis, embeds, downloads FROM movies WHERE url=?", (url,)
+        ).fetchone()
+        if existing and any(
+            value and str(value).strip() not in ("", "[]", "null")
+            for value in existing
+        ):
+            continue
         try:
             html = http.get(url)
         except Exception:

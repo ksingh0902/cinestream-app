@@ -23,7 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from config import SITE_MIRRORS
-from scraper.extract import parse_detail, parse_listing
+from scraper.extract import parse_detail, parse_listing, is_erotic_content
 from scraper.http import HttpClient
 from app.adapters.ask4movie import catalog as a4m_catalog
 from app.adapters.ask4movie.http import get as a4m_get
@@ -41,10 +41,13 @@ _LAST_SYNC_META = {
 YOMOVIES_PAGES = [
     # (relative_path, max_pages)
     ("/", 1),                      # Homepage featured & latest
+    ("/genre/top-rated/", 2),      # Mostly watched / Top rated
+    ("/series/", 3),               # English & International TV Series
+    ("/genre/web-series/", 2),     # Hindi Dubbed & Regional Web Series
+    ("/genre/tv-shows/", 2),       # TV Shows
     ("/release-year/2026/", 2),    # Current year releases
     ("/genre/bollywood/", 1),      # Latest Bollywood
     ("/genre/punjabi/", 1),        # Latest Punjabi
-    ("/genre/web-series/", 1),     # Latest Series
     ("/movies/", 1),               # General movies
 ]
 
@@ -84,6 +87,11 @@ def _is_hindi_dubbed(title: str, genres: list, quality: str) -> bool:
 
 def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at: int) -> bool:
     """Upsert a Yomovies media dictionary into the database."""
+    # Strictly reject erotic / softcore content from Ullu, AltBalaji, etc.
+    if is_erotic_content(m):
+        logger.info("Skipping excluded erotic title: %s (%s)", m.get("title"), m.get("url"))
+        return False
+
     url = m.get("url") or ""
     slug = (url.rstrip("/").rsplit("/", 1)[-1] or None) if url else None
     title = m.get("title") or ""
@@ -119,10 +127,14 @@ def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at
     year = str(m.get("year") or "")
     duration = str(m.get("duration") or "")
     is_series = int(m.get("is_series") or 0)
+    tmdb_id = str(m.get("tmdb_id") or "") or None
+
+    has_speedo = any(e.get("type") == "speedo" or "speedo" in (e.get("host") or "").lower() for e in embeds)
+    player_kind = "hls" if (has_speedo or not embeds) else "iframe"
 
     # Check if exists
     cur = conn.cursor()
-    cur.execute("SELECT id FROM movies WHERE url=? OR detail_url=? OR (source='yomovies' AND source_id=?)",
+    cur.execute("SELECT id, tmdb_id FROM movies WHERE url=? OR detail_url=? OR (source='yomovies' AND source_id=?)",
                 (url, url, slug))
     existing = cur.fetchone()
     is_new = existing is None
@@ -151,8 +163,9 @@ def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at
         "poster_url": poster,
         "rating": rating,
         "detail_url": url,
-        "player_kind": "hls",
+        "player_kind": player_kind,
         "is_hindi_dubbed": is_dubbed,
+        "tmdb_id": tmdb_id or (existing[1] if existing else None),
     }
 
     if is_new:

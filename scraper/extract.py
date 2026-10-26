@@ -16,14 +16,63 @@ DUR_RE   = re.compile(r'duration\s*:\s*"([\d.]+)"')
 POSTER_RE= re.compile(r'image\s*:\s*"([^"]+)"')
 
 
+EROTIC_REGEX = re.compile(
+    r"\b("
+    # Explicit Hot Series / erotic channels and app originals
+    r"ullu(?:[\s_-]*originals?)?|alt\s*balaji|altbalaji|kooku|primeshots|prime\s+shots|primeplay|prime\s+play|"
+    r"woow(?:[\s_-]*originals?)?|nuefliks|moodx|besharams\b|besharam\s+(?:originals?|app)|"
+    r"feneo(?:movies)?|gemplex|boom\s*movies|ek\s+night\s+show|"
+    r"hootzy|bamboo\s*flix|eight\s*shots|banana\s*prime|chikoo\s*flix|cinemadosti|cliff\s*movies|"
+    r"flixsks\s*movies|balloons\s+(?:originals?|app)|piliflix|i-entertainment|i\s+entertainment|hothit(?:films)?|glamheart|"
+    r"fliz(?:movies)?|hunters?\s+(?:originals?|app)|gupchup|gup\s*chup|primeflix|hot\s*masti|masti\s*prime|lootlo\s+(?:originals?|app)|"
+    r"big\s*movie\s*zoo|11up(?:movies)?|hot\s*prime|world\s*prime|"
+    r"bigshots|big\s+shots|hotx|hotshots|hot\s+shots|cineprime|cine\s+prime|"
+    r"rabbit\s+movies?|rabbit\s+original|voovi|"
+    r"redprime|red\s+prime|feelit|yessma|jalva|huntcinema|mastiplay|bulbulplay|kaddu|"
+    r"desiprime|atrangii|jugnutv|"
+    r"hot\s+series|hot\s+web\s*series|softcore|adult\s+series|adult\s+web\s*series|"
+    r"erotic\s+movies?|erotic\s+web\s*series|"
+    r"hotx\s+originals?\s+uncut|\(uncut\)|\[uncut\]"
+    r")\b",
+    re.I
+)
+
+
+def is_erotic_content(item: dict) -> bool:
+    """Strictly checks whether an item is erotic/softcore or from erotic channels
+
+    (Ullu, PrimePlay, WOOW, Nuefliks, MoodX, Hotshots, Fliz, Hunters, Kooku, etc.).
+    Mainstream 18+ titles (Action, Drama, Thriller like Game of Thrones, Person of Interest,
+    House of the Dragon, The Boys, etc.) return False (allowed).
+    """
+    title = str(item.get("title") or "")
+    url = str(item.get("url") or item.get("detail_url") or "")
+    genres = item.get("genres") or []
+    if isinstance(genres, list):
+        genres_str = " ".join(str(g) for g in genres)
+    else:
+        genres_str = str(genres)
+
+    # Category and URL fast-checks
+    url_l = url.lower()
+    genres_l = genres_str.lower()
+    if "/hot-series" in url_l or "/erotic" in url_l:
+        return True
+    if "erotic movies" in genres_l or "hot series" in genres_l:
+        return True
+
+    full_text = f"{title} {url} {genres_str}"
+    return bool(EROTIC_REGEX.search(full_text))
+
+
 def _t(n) -> str: return n.get_text(" ", strip=True) if n else ""
 
 
 def parse_listing(html: str, base: str) -> List[Dict]:
     soup = BeautifulSoup(html, "lxml")
     out, seen = [], set()
-    for node in soup.select("div.ml-item, article.item, div.items .item"):
-        a = node.find("a", href=True)
+    for node in soup.select("div.ml-item, a.ml-item, .ml-item, article.item, div.items .item"):
+        a = node if node.name == "a" else node.find("a", href=True)
         if not a:
             continue
         url = urljoin(base, a["href"])
@@ -37,13 +86,24 @@ def parse_listing(html: str, base: str) -> List[Dict]:
         img = node.find("img")
         poster = urljoin(base, (img.get("data-original") or img.get("data-src")
                                 or img.get("src") or "") if img else "")
+        genres = [a_g.get_text(strip=True) for a_g in node.select("a[href*='/genre/']")]
+        title_l = title.lower()
+        genres_l = [genre.lower() for genre in genres]
         out.append({
             "title": title, "url": url, "poster": poster,
             "quality": _t(node.select_one(".mli-quality, .quality, .label")),
             "imdb": _t(node.select_one(".jt-imdb, .imdb")),
             "year": _t(node.select_one("a[href*='/release-year/']")),
-            "genres": [a.get_text(strip=True) for a in node.select("a[href*='/genre/']")],
-            "is_series": 1 if "/series/" in url else 0,
+            "genres": genres,
+            "is_series": 1 if (
+                "/series/" in url or "/episode/" in url or "web series" in genres_l or "tv shows" in genres_l
+                or "season" in title_l or "episode" in title_l
+                or bool(re.search(r"\bs\d+\b|\be\d+\b", title_l))
+            ) else 0,
+            "is_hindi_dubbed": 1 if (
+                "hindi dubbed" in title_l or "dual audio" in title_l
+                or any("dub" in genre or "dual" in genre for genre in genres_l)
+            ) else 0,
         })
     return out
 
@@ -56,10 +116,24 @@ def parse_pagination(html: str, base: str) -> str | None:
 
 def parse_detail(html: str, url: str) -> Dict:
     soup = BeautifulSoup(html, "lxml")
-    info: Dict = {"url": url, "title": _t(soup.select_one("h1, .mvic-desc h3, .entry-title")),
+    title = (
+        _t(soup.select_one(".mvic-desc h3, .mvic-desc h1, .mvic-desc h2, h1.entry-title, .entry-title"))
+        or _t(soup.select_one(".breadcrumb li:last-child"))
+        or _t(soup.select_one("h1"))
+    )
+    is_series = 1 if (
+        "/series/" in url or "/episode/" in url or "season" in title.lower() or "episode" in title.lower()
+    ) else 0
+
+    ep_links = [urljoin(url, a["href"]) for a in soup.select("a[href*='/episode/']") if a.get("href")]
+    if ep_links:
+        is_series = 1
+
+    info: Dict = {"url": url, "title": title,
                   "poster": "", "synopsis": _t(soup.select_one(".mvic-desc .desc p, .f-desc")),
                   "genres": [], "actors": [], "director": [], "country": [],
                   "year": None, "duration": None, "quality": None, "imdb": None,
+                  "is_series": is_series, "episodes": ep_links,
                   "embeds": [], "downloads": []}
 
     og = soup.select_one("meta[property='og:image']")
@@ -125,6 +199,11 @@ def parse_detail(html: str, url: str) -> Dict:
             "url": f"https://vidsrc.sh/embed/movie?imdb={imdb_code}",
             "type": "embed"
         })
+
+    # Fallback to TMDB ID if present in embeds or page text
+    m_tmdb = re.search(r'(?:tmdb=|/tv/|/movie/)(\d+)', html)
+    if m_tmdb:
+        info["tmdb_id"] = m_tmdb.group(1)
 
     for a in soup.select("#list-dl a.lnk-lnk"):
         info["downloads"].append({

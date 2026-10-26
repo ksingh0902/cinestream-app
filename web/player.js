@@ -22,7 +22,7 @@ export async function mountPlayer(host, movieId) {
     const info = await res.json();
     host.innerHTML = "";
 
-    if (info.kind === "hls") {
+    if (info.kind === "hls" || info.kind === "video") {
       return mountHls(host, movieId, info);
     }
     return mountIframe(host, movieId, info);
@@ -43,8 +43,15 @@ async function mountHls(host, movieId, info) {
   container.appendChild(video);
   host.appendChild(container);
 
-  if (window.Hls && window.Hls.isSupported()) {
-    const hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+  if (info.kind === "video") {
+    video.src = info.url;
+    video.play().catch(() => {});
+  } else if (window.Hls && window.Hls.isSupported()) {
+    const hls = new window.Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      xhrSetup: (xhr) => { xhr.withCredentials = true; }
+    });
     hls.loadSource(info.url);
     hls.attachMedia(video);
 

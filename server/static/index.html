@@ -349,6 +349,17 @@ select:focus {
   color: #fff !important;
   box-shadow: 0 3px 12px rgba(234, 88, 12, 0.45) !important;
 }
+.pill-doo {
+  border-color: #7c3aed !important;
+  color: #a78bfa !important;
+  font-weight: 700;
+}
+.pill-doo:hover { background: rgba(124,58,237,0.16) !important; }
+.pill-doo.active {
+  background: #7c3aed !important;
+  border-color: #8b5cf6 !important;
+  color: #fff !important;
+}
 .pill-ym {
   border-color: #3b82f6 !important;
   color: #60a5fa !important;
@@ -732,6 +743,61 @@ select:focus {
   color: #fff;
 }
 
+/* Next Episode Autoplay Toast in Player Overlay */
+.next-ep-banner {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 35;
+  background: rgba(14, 17, 24, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid #ea580c;
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.85), 0 0 20px rgba(234, 88, 12, 0.3);
+  max-width: 90%;
+  animation: fadeInUp .25s ease-out;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.next-ep-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.next-ep-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-next-ep {
+  background: #ea580c !important;
+  color: #fff !important;
+  border: 1px solid #f97316 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+}
+.btn-next-ep:hover {
+  background: #c2410c !important;
+  transform: translateY(-1px);
+}
+@media (max-width: 640px) {
+  .next-ep-banner {
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    padding: 10px 14px;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+}
+
 /* Device Viewing History Info Modal */
 .cw-modal {
   position: fixed;
@@ -911,6 +977,12 @@ select:focus {
   color: #fff !important;
   font-weight: 700 !important;
   box-shadow: 0 2px 8px rgba(234,88,12,0.4) !important;
+}
+.badge-doo {
+  background: #7c3aed !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(124,58,237,0.4) !important;
 }
 .badge-ym {
   background: #1d4ed8 !important;
@@ -1334,6 +1406,230 @@ video:-moz-full-screen,
   height: 100vh !important;
   border: 0 !important;
 }
+.player-container:fullscreen video,
+.player-container:-webkit-full-screen video,
+.player-container:-moz-full-screen video {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  object-fit: contain;
+}
+
+/* Fullscreen Top Controls Bar */
+.fs-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99996;
+  padding: 16px 24px;
+  background: linear-gradient(180deg, rgba(10, 12, 16, 0.94) 0%, rgba(10, 12, 16, 0.7) 65%, transparent 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+.player-container:fullscreen .fs-top-bar.fs-visible,
+.player-container:-webkit-full-screen .fs-top-bar.fs-visible,
+.player-container:fullscreen:hover .fs-top-bar,
+.player-container:-webkit-full-screen:hover .fs-top-bar,
+.fs-top-bar:hover {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  pointer-events: auto !important;
+}
+.fs-top-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.fs-btn-back {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-btn-back:hover {
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.fs-title {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.fs-btn-next {
+  background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  padding: 7px 16px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.45);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-btn-next:hover {
+  transform: scale(1.04);
+  box-shadow: 0 6px 20px rgba(234, 88, 12, 0.65);
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+}
+.fs-btn-icon {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.fs-btn-icon:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* Fullscreen Floating Quick Next Button */
+.fs-floating-next-btn {
+  position: absolute;
+  bottom: 38px;
+  right: 28px;
+  z-index: 99998;
+  background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  padding: 10px 20px;
+  border-radius: 9999px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 8px 24px rgba(234, 88, 12, 0.55), 0 2px 8px rgba(0,0,0,0.85);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.25s ease;
+  user-select: none;
+  opacity: 0.94;
+}
+.fs-floating-next-btn:hover {
+  opacity: 1 !important;
+  transform: scale(1.06);
+  box-shadow: 0 10px 30px rgba(234, 88, 12, 0.75), 0 4px 12px rgba(0,0,0,0.9);
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+}
+.fs-floating-next-btn:active {
+  transform: scale(0.97);
+}
+.player-container.fs-idle .fs-floating-next-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+.player-container.fs-idle .fs-top-bar {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Resume & Next Episode Overlays */
+.resume-banner, .next-ep-banner {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(15, 17, 23, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(234, 88, 12, 0.45);
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.8), 0 0 20px rgba(234,88,12,0.25);
+  z-index: 99997;
+  max-width: 90%;
+}
+.resume-banner {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.85);
+}
+.resume-info, .next-ep-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.resume-buttons, .next-ep-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-resume-action {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent, #ea580c);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-resume-action:hover {
+  transform: scale(1.04);
+}
+.btn-resume-secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+.btn-resume-secondary:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.btn-resume-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.btn-resume-close:hover {
+  color: #fff;
+}
+
 video {
   width: 100%;
   height: 100%;
@@ -1545,6 +1841,119 @@ footer {
   border-radius: 6px;
   padding: 3px 8px;
 }
+
+/* Seasons & Episodes Section */
+.series-seasons-wrap {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.seasons-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.seasons-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.seasons-count-badge {
+  background: rgba(255, 123, 57, 0.16);
+  color: var(--accent);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.seasons-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+.seasons-nav::-webkit-scrollbar {
+  height: 4px;
+}
+.seasons-nav::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+.season-tab-btn {
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.season-tab-btn:hover {
+  border-color: var(--accent);
+  color: var(--txt);
+}
+.season-tab-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(255, 123, 57, 0.35);
+}
+.episodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 3px 2px;
+  scrollbar-width: thin;
+}
+.episodes-grid::-webkit-scrollbar {
+  width: 5px;
+}
+.episodes-grid::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.ep-chip {
+  padding: 8px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--txt);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.ep-chip:hover {
+  border-color: var(--accent);
+  background: rgba(255, 123, 57, 0.12);
+  color: var(--accent);
+}
+.ep-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(255, 123, 57, 0.4);
+}
 </style>
 </head>
 <body>
@@ -1556,6 +1965,7 @@ footer {
         <option value="" selected>🌐 All Sources</option>
         <option value="yomovies">🎬 ym</option>
         <option value="ask4movie">🍿 ask</option>
+        <option value="dooflix">▶️ doo</option>
       </select>
       <select id="sort" title="Sort catalogue">
         <option value="recent" selected>⚡ New</option>
@@ -1600,6 +2010,7 @@ footer {
   <button class="pill pill-series" data-kind="1" data-genre="" data-source="" onclick="setQuickFilter('1', '', '')">📺 Web Series</button>
   <button class="pill pill-movies" data-kind="0" data-genre="" data-source="" onclick="setQuickFilter('0', '', '')">🎬 Movies</button>
   <button class="pill pill-ask" data-kind="" data-genre="" data-source="ask4movie" onclick="setQuickFilter('', '', 'ask4movie')">🍿 ask</button>
+  <button class="pill pill-doo" data-kind="" data-genre="" data-source="dooflix" onclick="setQuickFilter('', '', 'dooflix')">▶️ doo</button>
   <button class="pill pill-ym" data-kind="" data-genre="" data-source="yomovies" onclick="setQuickFilter('', '', 'yomovies')">🎬 ym</button>
   <span class="pill-divider"></span>
   <button class="pill" data-kind="" data-genre="Action" data-source="" onclick="setQuickFilter('', 'Action', '')">💥 Action</button>
@@ -1632,13 +2043,14 @@ footer {
 
 <div id="grid"></div>
 <div id="pager"></div>
-<footer>cinemymovies stores no media files; it indexes third-party embeds. &middot; Movie information and artwork from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</footer>
+<footer>Welcome</footer>
 
 <div id="overlay">
   <div class="box">
     <div class="row">
       <h2 id="p-title"></h2>
       <div class="btn-group">
+        <button id="btn-next-ep" class="btn-action btn-next-ep" style="display:none;" onclick="playNextEpisode()" title="Play Next Episode">⏭️ Next Episode</button>
         <button id="btn-rewind" class="btn-action" onclick="handleSkip(-1)" title="Rewind 10s (Left Arrow / Click)">⏪ -10s</button>
         <button id="btn-forward" class="btn-action" onclick="handleSkip(1)" title="Skip Forward 10s (Right Arrow / Click)">⏩ +10s</button>
         <button id="btn-cc" class="btn-action" onclick="toggleCC()" title="Toggle English Subtitles (Press C)">CC: English (ON)</button>
@@ -1647,6 +2059,22 @@ footer {
       </div>
     </div>
     <div class="player-container" id="player-container">
+      <!-- Fullscreen Top Controls Bar -->
+      <div id="fs-top-bar" class="fs-top-bar" style="display:none;">
+        <div class="fs-top-left">
+          <button class="fs-btn-back" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (Escape or F)">← Exit</button>
+          <span id="fs-show-title" class="fs-title"></span>
+        </div>
+        <div class="fs-top-right">
+          <button id="fs-btn-next-ep" class="fs-btn-next" style="display:none;" onclick="playNextEpisode()" title="Play Next Episode (Press N)">⏭️ Next Episode</button>
+          <button class="fs-btn-icon" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (F)">🗗</button>
+        </div>
+      </div>
+      <!-- Fullscreen Floating Quick Next Button -->
+      <button id="fs-floating-next-btn" class="fs-floating-next-btn" style="display:none;" onclick="playNextEpisode()" title="Play Next Episode (Press N)">
+        <span>⏭️</span>
+        <span id="fs-floating-next-text">Next Episode</span>
+      </button>
       <video id="v" controls playsinline crossorigin="anonymous"></video>
       <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true" referrerpolicy="no-referrer"></iframe>
       <div id="player-hud"></div>
@@ -1661,6 +2089,19 @@ footer {
           <button class="btn-resume-close" onclick="dismissResumePrompt()" title="Dismiss" tabindex="0">&times;</button>
         </div>
       </div>
+      <div id="next-ep-banner" class="next-ep-banner" style="display:none;">
+        <div class="next-ep-info">
+          <span style="font-size:20px;">⏭️</span>
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#f97316;font-weight:700;">Up Next in <span id="next-ep-countdown">5</span>s</div>
+            <div id="next-ep-text" style="font-weight:600;font-size:13.5px;color:#fff;margin-top:2px;">Playing Next Episode</div>
+          </div>
+        </div>
+        <div class="next-ep-buttons">
+          <button id="btn-next-ep-now" class="btn-resume-action" onclick="playNextEpisode()" style="background:#ea580c;color:#fff;font-weight:700;">▶️ Play Now</button>
+          <button class="btn-resume-action btn-resume-secondary" onclick="dismissNextEpisodeToast()">✕ Cancel</button>
+        </div>
+      </div>
     </div>
     <div id="server-switcher" style="display:none;gap:8px;padding:8px 0;flex-wrap:wrap;"></div>
     <div id="alt-source-wrap" style="display:none;margin-top:8px;font-size:12.5px;color:var(--dim);"></div>
@@ -1670,11 +2111,32 @@ footer {
         <button class="btn-retry" onclick="retryStream()">🔄 Retry Stream</button>
       </div>
     </div>
+    <div id="series-seasons-wrap" class="series-seasons-wrap" style="display:none;"></div>
     <p class="syn" id="p-syn"></p>
   </div>
 </div>
 
 <script>
+/* Suppress anti-debugging detector loop spam (disable-devtool etc.) from third-party players */
+(function(){
+  const _log = console.log, _warn = console.warn, _info = console.info;
+  function isSpam(args){
+    if(!args || !args.length) return false;
+    for(let i = 0; i < args.length; i++){
+      const a = args[i];
+      if(a instanceof Date) return true;
+      if(typeof a === 'string' && /GMT[+-]\d{4}/.test(a)) return true;
+      if(typeof a === 'function' && (!a.name || a.name === '')) return true;
+      if(a instanceof HTMLElement) return true;
+      if(typeof a === 'string' && /<\/?div/i.test(a)) return true;
+    }
+    return false;
+  }
+  console.log = function(...args){ if(!isSpam(args)) _log.apply(console, args); };
+  console.warn = function(...args){ if(!isSpam(args)) _warn.apply(console, args); };
+  console.info = function(...args){ if(!isSpam(args)) _info.apply(console, args); };
+})();
+
 const grid = document.getElementById('grid'), pager = document.getElementById('pager');
 const overlay = document.getElementById('overlay'), video = document.getElementById('v');
 const statusEl = document.getElementById('p-status'), hudEl = document.getElementById('player-hud');
@@ -1727,6 +2189,96 @@ function toggleDensity(){
 applyDensity(mobileCols);
 
 const esc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+/* =========================================================================
+   Rich Dynamic Poster Fallback System
+   ========================================================================= */
+function getPosterFallbackSvg(title, year, source) {
+  const safeTitle = (title || 'Movie').replace(/[<>&"']/g, '').trim();
+  const words = safeTitle.split(/\s+/);
+  let line1 = '', line2 = '';
+  for (const w of words) {
+    if ((line1 + ' ' + w).trim().length <= 22 && !line2) {
+      line1 = (line1 + ' ' + w).trim();
+    } else if ((line2 + ' ' + w).trim().length <= 22) {
+      line2 = (line2 + ' ' + w).trim();
+    } else if (!line2) {
+      line2 = w.slice(0, 20) + '…';
+    }
+  }
+  if (!line1) line1 = safeTitle.slice(0, 22);
+
+  const isAsk = source === 'ask4movie';
+  const isDoo = source === 'dooflix';
+  const accent = isAsk ? '#ea580c' : (isDoo ? '#dc2626' : '#2563eb');
+  const sourceName = isAsk ? 'ASK4MOVIE' : (isDoo ? 'DOOFLIX' : 'YOMOVIES');
+  const sourceIcon = isAsk ? '🍿' : (isDoo ? '▶️' : '🎬');
+  const yrStr = (year ? String(year).trim() : '') || 'Feature Title';
+
+  const tY1 = line2 ? '280' : '290';
+  const tY2 = '305';
+  const subY = line2 ? '332' : '318';
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#181b24"/>
+      <stop offset="60%" stop-color="#0f1117"/>
+      <stop offset="100%" stop-color="#090a0e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="36%" r="50%">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#glow)"/>
+  <g opacity="0.15" fill="#ffffff">
+    <rect x="8" y="20" width="8" height="12" rx="2"/>
+    <rect x="8" y="44" width="8" height="12" rx="2"/>
+    <rect x="8" y="68" width="8" height="12" rx="2"/>
+    <rect x="8" y="92" width="8" height="12" rx="2"/>
+    <rect x="284" y="20" width="8" height="12" rx="2"/>
+    <rect x="284" y="44" width="8" height="12" rx="2"/>
+    <rect x="284" y="68" width="8" height="12" rx="2"/>
+    <rect x="284" y="92" width="8" height="12" rx="2"/>
+  </g>
+  <circle cx="150" cy="165" r="52" fill="#141822" stroke="${accent}" stroke-width="1.8" stroke-opacity="0.5"/>
+  <circle cx="150" cy="165" r="44" fill="rgba(255,255,255,0.02)"/>
+  <g transform="translate(126, 141)" fill="${accent}">
+    <path d="M4 4h40c2.2 0 4 1.8 4 4v32c0 2.2-1.8 4-4 4H4c-2.2 0-4-1.8-4-4V8c0-2.2 1.8-4 4-4zm2 12v24c0 1.1.9 2 2 2h36c1.1 0 2-.9 2-2V16H6zm0-6v4h8.5l4.5-4H6zm14 0l-4.5 4h9l4.5-4h-9zm14.5 0l-4.5 4H42c1.1 0 2-.9 2-2v-2h-9.5z"/>
+  </g>
+  <text x="150" y="${tY1}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#f8fafc" text-anchor="middle" letter-spacing="-0.2">${line1}</text>
+  ${line2 ? `<text x="150" y="${tY2}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="700" fill="#f8fafc" text-anchor="middle" letter-spacing="-0.2">${line2}</text>` : ''}
+  <text x="150" y="${subY}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#94a3b8" text-anchor="middle">${yrStr}</text>
+  <rect x="90" y="388" width="120" height="26" rx="13" fill="#0f172a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="150" y="405" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" font-weight="800" fill="${accent}" letter-spacing="1.2" text-anchor="middle">${sourceIcon} ${sourceName}</text>
+</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+function getCardPosterUrl(poster, title, year, source) {
+  if (!poster || poster.includes('logo.png') || poster.startsWith('/assets/') || poster === 'None' || poster === 'null') {
+    return getPosterFallbackSvg(title, year, source);
+  }
+  return poster;
+}
+
+function handleCardImgError(img) {
+  img.onerror = null;
+  const title = img.dataset.title || '';
+  const year = img.dataset.year || '';
+  const source = img.dataset.source || '';
+  img.src = getPosterFallbackSvg(title, year, source);
+}
+
+function handleThumbImgError(img) {
+  img.onerror = null;
+  const source = img.dataset.source || '';
+  const accent = source === 'ask4movie' ? '#ea580c' : (source === 'dooflix' ? '#dc2626' : '#2563eb');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 38 54" width="38" height="54"><rect width="100%" height="100%" fill="#181b24"/><circle cx="19" cy="27" r="12" fill="${accent}" opacity="0.35"/><text x="19" y="31" font-size="13" text-anchor="middle" fill="#fff">🎬</text></svg>`;
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
 
 /* =========================================================================
    Continue Watching & Playback Progress (Independent Browser Storage)
@@ -1889,7 +2441,7 @@ function renderContinueWatching() {
       <div class="cw-card" tabindex="0" role="button" aria-label="Continue ${esc(it.title)}" onclick="openPlayer(${it.id})">
         <button class="cw-btn-remove" onclick="removeCwItem('${esc(it.contentId)}', event)" title="Remove from Continue Watching">&times;</button>
         <div class="cw-poster-wrap">
-          <img src="${esc(it.poster)}" alt="" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22142%22 height=%22213%22 fill=%22%23222%22><rect width=%22100%%22 height=%22100%%22/></svg>'">
+          <img src="${esc(getCardPosterUrl(it.poster, it.title, it.year, it.source))}" alt="${esc(it.title)}" data-title="${esc(it.title)}" data-year="${esc(it.year||'')}" data-source="${esc(it.source||'')}" loading="lazy" onerror="handleCardImgError(this)">
           <div class="cw-play-overlay">
             <div class="cw-play-icon">▶</div>
           </div>
@@ -2052,6 +2604,9 @@ video.addEventListener('ended', () => {
   if (activeContentId) {
     StorageManager.removeItem(activeContentId);
     renderContinueWatching();
+  }
+  if (currentSeriesData && currentSeriesData.is_series && getNextEpisode()) {
+    showNextEpisodeToast();
   }
 });
 document.addEventListener('visibilitychange', () => {
@@ -2277,13 +2832,15 @@ async function load(){
         <div class="card-badges">
           ${m.source==='ask4movie'
             ? '<span class="badge badge-ask">🍿 ask</span>'
-            : '<span class="badge badge-ym">🎬 ym</span>'}
+            : m.source==='dooflix'
+              ? '<span class="badge badge-doo">▶️ doo</span>'
+              : '<span class="badge badge-ym">🎬 ym</span>'}
           ${m.is_hindi_dubbed
             ? '<span class="badge badge-dub" title="Hindi Dubbed"><span class="dub-icon">🎙️</span><span class="dub-txt-full"> Hindi Dubbed</span><span class="dub-txt-short"> Hindi</span></span>'
             : ''}
         </div>
         ${m.is_series?`<span class="badge-series">Series</span>`:''}
-        <img loading="lazy" src="${esc(m.poster || m.poster_url)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22225%22 fill=%22%23222%22><rect width=%22100%%22 height=%22100%%22/></svg>'">
+        <img loading="lazy" src="${esc(getCardPosterUrl(m.poster || m.poster_url, m.title, m.year, m.source))}" alt="${esc(m.title)}" data-title="${esc(m.title)}" data-year="${esc(m.year||'')}" data-source="${esc(m.source||'')}" onerror="handleCardImgError(this)">
         <div class="t" title="${esc(m.title)}">${esc(m.title)}</div>
         <div class="m">
           <span>${esc(m.year||'')}${m.language ? ' · ' + esc(m.language) : ''}</span>
@@ -2417,6 +2974,20 @@ async function openPlayer(id){
   lastProgressSaveTime = 0;
   targetSeekTime = 0;
   dismissResumePrompt();
+  dismissNextEpisodeToast();
+  const btnNext = document.getElementById('btn-next-ep');
+  if(btnNext) btnNext.style.display = 'none';
+  const fsBtn = document.getElementById('fs-btn-next-ep');
+  if(fsBtn) fsBtn.style.display = 'none';
+  const fsFloatBtn = document.getElementById('fs-floating-next-btn');
+  if(fsFloatBtn) fsFloatBtn.style.display = 'none';
+
+  // Reset Seasons UI
+  const seasonsWrap = document.getElementById('series-seasons-wrap');
+  if(seasonsWrap){
+    seasonsWrap.style.display = 'none';
+    seasonsWrap.innerHTML = '';
+  }
 
   const initItem = window.movieCache?.get(id) || {};
   const sInfo = extractSeriesInfo(initItem.title, initItem);
@@ -2467,25 +3038,30 @@ async function openPlayer(id){
     checkAndShowResumeBanner(activeContentId);
 
     const isAsk = item.source === 'ask4movie';
+    const isDoo = item.source === 'dooflix';
     const srcTag = isAsk
       ? '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#ea580c;color:#fff;vertical-align:middle;">🍿 ask</span>'
-      : '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#1d4ed8;color:#fff;vertical-align:middle;">🎬 ym</span>';
+      : isDoo
+        ? '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#7c3aed;color:#fff;vertical-align:middle;">▶️ doo</span>'
+        : '<span style="display:inline-block;margin-right:6px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#1d4ed8;color:#fff;vertical-align:middle;">🎬 ym</span>';
     const dubTag = item.is_hindi_dubbed
       ? '<span style="display:inline-block;margin-right:8px;padding:2px 8px;font-size:11px;font-weight:700;border-radius:4px;background:#059669;color:#fff;vertical-align:middle;box-shadow:0 2px 6px rgba(5,150,105,0.4);">🎙️ Hindi Dubbed</span>'
       : '';
     const hasYearInTitle = item.title && /\(\s*\d{4}\s*\)/.test(item.title);
     const yr = (item.year && !hasYearInTitle) ? ` (${esc(item.year)})` : '';
     document.getElementById('p-title').innerHTML = `${srcTag} ${dubTag} ${esc(item.title || ('Movie #' + id))}${yr}`;
+    const fsTitle = document.getElementById('fs-show-title');
+    if(fsTitle) fsTitle.textContent = item.title || '';
     document.getElementById('p-syn').textContent = item.synopsis || '';
 
-    // Cross-source dedupe switcher ("also available on")
-    if(altWrap && item.also_available_on && item.also_available_on.length > 0){
-      const altsHtml = item.also_available_on.map(alt => {
-        const altDub = alt.is_hindi_dubbed ? ' (🎙️ Hindi Dubbed)' : '';
-        const altSrc = alt.source === 'ask4movie' ? '🍿 ask' : '🎬 ym';
-        return `<button class="pill" style="display:inline-block;margin-left:6px;padding:3px 10px;font-size:11.5px;background:var(--card);border:1px solid var(--border);color:var(--txt);border-radius:12px;cursor:pointer;" onclick="openPlayer(${alt.id})">Switch to ${altSrc}${altDub}</button>`;
-      }).join('');
-      altWrap.innerHTML = `<span>Also available on:</span> ${altsHtml}`;
+    const sourceLabel = alt => alt.source === 'ask4movie' ? '🍿 Ask4Movies' : (alt.source === 'dooflix' ? '▶️ DooFlix' : '🎬 YoMovies');
+    const editionLabel = alt => ({hindi_dubbed:'Hindi Dubbed',dual_audio:'Dual Audio',hindi:'Hindi',english:'English',unknown:'Other'})[alt.audio_edition] || 'Other';
+    const sameSources = item.available_sources || item.also_available_on || [];
+    const otherEditions = item.other_editions || [];
+    if(altWrap && (sameSources.length || otherEditions.length)){
+      const sameHtml = sameSources.map(alt => `<button class="pill" style="display:inline-block;margin:3px 0 3px 6px;padding:3px 10px;font-size:11.5px;background:var(--card);border:1px solid var(--border);color:var(--txt);border-radius:12px;cursor:pointer;" onclick="openPlayer(${alt.id})">Switch to ${sourceLabel(alt)}</button>`).join('');
+      const editionsHtml = otherEditions.map(alt => `<button class="pill" style="display:inline-block;margin:3px 0 3px 6px;padding:3px 10px;font-size:11.5px;background:var(--card);border:1px solid var(--border);color:var(--txt);border-radius:12px;cursor:pointer;" onclick="openPlayer(${alt.id})">${editionLabel(alt)} · ${sourceLabel(alt)}</button>`).join('');
+      altWrap.innerHTML = `${sameHtml ? `<div><span>Same-edition sources:</span> ${sameHtml}</div>` : ''}${editionsHtml ? `<div style="margin-top:5px"><span>Other editions:</span> ${editionsHtml}</div>` : ''}`;
       altWrap.style.display = 'block';
     } else if(altWrap) {
       altWrap.style.display = 'none';
@@ -2496,7 +3072,7 @@ async function openPlayer(id){
   const cachedItem = window.movieCache?.get(id);
   if(cachedItem) renderMeta(cachedItem);
 
-  fetch((API_BASE || '') + `/api/movie/${id}`)
+  fetch((API_BASE || '') + `/api/movie/${id}`, { credentials: 'include' })
     .then(r => r.ok ? r.json() : null)
     .then(fullItem => {
       if(fullItem && curId === id){
@@ -2514,30 +3090,265 @@ async function openPlayer(id){
   const btnCC = document.getElementById('btn-cc');
   if(btnCC) btnCC.textContent = 'CC: English (ON)';
 
+  // Load Seasons & Episodes hierarchy asynchronously
+  loadSeriesSeasons(id);
+
   await fetchStream(id);
 }
 
-async function fetchStream(id, fresh = false){
+let currentSeriesData = null;
+let activeSeasonNum = 1;
+let activeEpisodeNum = 1;
+let nextEpCountdownTimer = null;
+let nextEpSecondsLeft = 5;
+
+function getNextEpisode(){
+  if(!currentSeriesData || !currentSeriesData.seasons) return null;
+  const seasons = currentSeriesData.seasons;
+  const curSeason = seasons.find(s => s.season_number === activeSeasonNum) || seasons[0];
+  if(!curSeason || !curSeason.episodes) return null;
+
+  const episodes = curSeason.episodes;
+  const curIdx = episodes.findIndex(ep => ep.e === activeEpisodeNum);
+  
+  if(curIdx !== -1 && curIdx + 1 < episodes.length){
+    const nextEp = episodes[curIdx + 1];
+    return {
+      season: activeSeasonNum,
+      episode: nextEp.e,
+      movieId: nextEp.movie_id,
+      label: `S${activeSeasonNum} E${nextEp.e}`,
+      name: nextEp.name || `Episode ${nextEp.e}`
+    };
+  }
+
+  // Last episode of current season, check if next season exists
+  const nextSeason = seasons.find(s => s.season_number === activeSeasonNum + 1);
+  if(nextSeason && nextSeason.episodes && nextSeason.episodes.length > 0){
+    const nextEp = nextSeason.episodes[0];
+    return {
+      season: nextSeason.season_number,
+      episode: nextEp.e,
+      movieId: nextEp.movie_id,
+      label: `S${nextSeason.season_number} E${nextEp.e}`,
+      name: nextEp.name || `Episode ${nextEp.e}`
+    };
+  }
+
+  return null;
+}
+
+function updateNextEpisodeBtn(){
+  const btn = document.getElementById('btn-next-ep');
+  const fsBtn = document.getElementById('fs-btn-next-ep');
+  const fsFloatBtn = document.getElementById('fs-floating-next-btn');
+  const fsFloatTxt = document.getElementById('fs-floating-next-text');
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+
+  const next = getNextEpisode();
+  if(next){
+    if(btn){
+      btn.style.display = 'inline-flex';
+      btn.textContent = `⏭️ Next (${next.label})`;
+      btn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
+    }
+    if(fsBtn){
+      fsBtn.style.display = 'inline-flex';
+      fsBtn.textContent = `⏭️ Next (${next.label})`;
+      fsBtn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
+    }
+    if(fsFloatBtn){
+      fsFloatBtn.style.display = isFs ? 'flex' : 'none';
+      if(fsFloatTxt) fsFloatTxt.textContent = `Next (${next.label})`;
+      fsFloatBtn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
+    }
+  } else {
+    if(btn) btn.style.display = 'none';
+    if(fsBtn) fsBtn.style.display = 'none';
+    if(fsFloatBtn) fsFloatBtn.style.display = 'none';
+  }
+}
+
+async function playNextEpisode(){
+  dismissNextEpisodeToast();
+  const next = getNextEpisode();
+  if(!next){
+    showHud('End of Series');
+    return;
+  }
+  showHud(`Playing ${next.label}`);
+  await selectEpisodeChip(next.season, next.episode, next.movieId);
+}
+
+function showNextEpisodeToast(){
+  const next = getNextEpisode();
+  if(!next) return;
+
+  const banner = document.getElementById('next-ep-banner');
+  const countEl = document.getElementById('next-ep-countdown');
+  const textEl = document.getElementById('next-ep-text');
+  if(!banner || !countEl || !textEl) return;
+
+  if(nextEpCountdownTimer) clearInterval(nextEpCountdownTimer);
+
+  nextEpSecondsLeft = 5;
+  countEl.textContent = String(nextEpSecondsLeft);
+  textEl.textContent = `${next.label}${next.name ? ' · ' + next.name : ''}`;
+  banner.style.display = 'flex';
+
+  nextEpCountdownTimer = setInterval(()=>{
+    nextEpSecondsLeft--;
+    if(nextEpSecondsLeft > 0){
+      countEl.textContent = String(nextEpSecondsLeft);
+    } else {
+      clearInterval(nextEpCountdownTimer);
+      nextEpCountdownTimer = null;
+      banner.style.display = 'none';
+      playNextEpisode();
+    }
+  }, 1000);
+}
+
+function dismissNextEpisodeToast(){
+  if(nextEpCountdownTimer){
+    clearInterval(nextEpCountdownTimer);
+    nextEpCountdownTimer = null;
+  }
+  const banner = document.getElementById('next-ep-banner');
+  if(banner) banner.style.display = 'none';
+}
+
+async function loadSeriesSeasons(id){
+  const wrap = document.getElementById('series-seasons-wrap');
+  if(!wrap) return;
+  try {
+    const res = await fetch((API_BASE || '') + `/api/series/${id}/seasons`, { credentials: 'include' });
+    if(!res.ok) return;
+    const data = await res.json();
+    if(curId !== id) return;
+    if(!data.is_series || !data.seasons || data.seasons.length === 0){
+      wrap.style.display = 'none';
+      return;
+    }
+    currentSeriesData = data;
+    activeSeasonNum = data.current_season || 1;
+    activeEpisodeNum = data.current_episode || 1;
+    renderSeasonsUI();
+    updateNextEpisodeBtn();
+  } catch(e){
+    console.warn('Failed to load series seasons', e);
+  }
+}
+
+function renderSeasonsUI(){
+  const wrap = document.getElementById('series-seasons-wrap');
+  if(!wrap || !currentSeriesData || !currentSeriesData.seasons) return;
+
+  const seasons = currentSeriesData.seasons;
+  let currentSeasonObj = seasons.find(s => s.season_number === activeSeasonNum) || seasons[0];
+  if(currentSeasonObj){
+    activeSeasonNum = currentSeasonObj.season_number;
+  }
+
+  const navHtml = seasons.map(s => {
+    const isActive = s.season_number === activeSeasonNum;
+    return `<button class="season-tab-btn${isActive ? ' active' : ''}" onclick="selectSeasonTab(${s.season_number})">${esc(s.name || ('Season ' + s.season_number))} (${s.episode_count})</button>`;
+  }).join('');
+
+  const episodes = currentSeasonObj ? (currentSeasonObj.episodes || []) : [];
+  const epGridHtml = episodes.map(ep => {
+    const isActive = (ep.s === activeSeasonNum && ep.e === activeEpisodeNum);
+    const label = `Ep ${ep.episode_number}`;
+    const fullTitle = `${esc(ep.name || label)}${ep.movie_id && ep.movie_id !== curId ? ' (Native)' : ''}`;
+    return `<button class="ep-chip${isActive ? ' active' : ''}" title="${fullTitle}" onclick="selectEpisodeChip(${ep.s}, ${ep.e}, ${ep.movie_id || 'null'})">${esc(label)}</button>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="seasons-top-bar">
+      <div class="seasons-title">
+        <span>📺</span>
+        <span>${esc(currentSeriesData.title || 'Episodes')}</span>
+        <span class="seasons-count-badge">${currentSeasonObj ? currentSeasonObj.episode_count : 0} Episodes</span>
+      </div>
+    </div>
+    <div class="seasons-nav">${navHtml}</div>
+    <div class="episodes-grid">${epGridHtml}</div>
+  `;
+  wrap.style.display = 'block';
+  updateNextEpisodeBtn();
+}
+
+function selectSeasonTab(seasonNum){
+  activeSeasonNum = seasonNum;
+  renderSeasonsUI();
+}
+
+async function selectEpisodeChip(sNum, eNum, epMovieId){
+  dismissNextEpisodeToast();
+  activeSeasonNum = sNum;
+  activeEpisodeNum = eNum;
+  renderSeasonsUI();
+  updateNextEpisodeBtn();
+
+  // Update p-title to reflect active season and episode cleanly
+  const pTitleEl = document.getElementById('p-title');
+  if(currentSeriesData){
+    const baseTitle = currentSeriesData.title || (window.movieCache?.get(curId)?.title) || '';
+    const cleanBase = baseTitle.replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
+    const epPad = String(eNum).padStart(2, '0');
+    const sPad = String(sNum).padStart(2, '0');
+    if(pTitleEl){
+      const curBadge = pTitleEl.querySelector('span[style*="background"]');
+      const badgeHtml = curBadge ? curBadge.outerHTML + ' ' : '';
+      pTitleEl.innerHTML = `${badgeHtml}${esc(cleanBase)} · S${sPad} E${epPad}`;
+    }
+    const fsTitle = document.getElementById('fs-show-title');
+    if(fsTitle){
+      fsTitle.textContent = `${cleanBase} · S${sPad} E${epPad}`;
+    }
+  }
+
+  if(epMovieId && epMovieId !== curId){
+    openPlayer(epMovieId);
+  } else {
+    statusEl.innerHTML = `<span class="spinner"></span> Playing Season ${sNum} Episode ${eNum}…`;
+    await fetchStream(curId, false, sNum, eNum);
+  }
+}
+
+async function fetchStream(id, fresh = false, season = null, episode = null){
   const mySeq = ++currentResolveSeq;
   if(currentStreamAbort) currentStreamAbort.abort();
   currentStreamAbort = new AbortController();
 
   if(retryWrap) retryWrap.style.display = 'none';
-  statusEl.innerHTML = `<span class="spinner"></span> Resolving stream from high-speed servers…`;
+  const epLabel = (season != null && episode != null) ? ` S${season} E${episode}` : '';
+  statusEl.innerHTML = `<span class="spinner"></span> Resolving stream${epLabel} from high-speed servers…`;
 
-  // Timeout guard (16s)
+  // Progressive timeout guard: show status update at 12s, show retry at 35s WITHOUT aborting network connection
+  const slowNoticeTimer = setTimeout(()=>{
+    if(mySeq === currentResolveSeq){
+      statusEl.innerHTML = `<span class="spinner"></span> Contacting stream servers${epLabel} (first-time initialization)…`;
+    }
+  }, 12000);
+
   const timeoutId = setTimeout(()=>{
     if(mySeq === currentResolveSeq){
-      if(currentStreamAbort) currentStreamAbort.abort();
       statusEl.innerHTML = `<span style="color:#ff9359">⚠️ Stream resolution is taking longer than usual.</span>`;
       if(retryWrap) retryWrap.style.display = 'block';
     }
-  }, 16000);
+  }, 35000);
 
   try {
-    const res = await fetch(API_BASE + `/api/stream/${id}${fresh?'?fresh=1':''}`, {
-      signal: currentStreamAbort.signal
+    let epQuery = '';
+    if(season != null && episode != null){
+      epQuery = `&season=${encodeURIComponent(season)}&episode=${encodeURIComponent(episode)}`;
+    }
+    const res = await fetch(API_BASE + `/api/stream/${id}?fresh=${fresh?1:0}${epQuery}`, {
+      signal: currentStreamAbort.signal,
+      credentials: 'include'
     });
+    clearTimeout(slowNoticeTimer);
     clearTimeout(timeoutId);
 
     if(mySeq !== currentResolveSeq) return;
@@ -2572,7 +3383,8 @@ async function fetchStream(id, fresh = false){
       if(cc) cc.style.display = 'none';
 
       const firstServerLabel = (s.servers && s.servers.length > 0) ? s.servers[0].label : (s.host || 'HD');
-      statusEl.textContent = `${firstServerLabel} · Active stream player ${s.cached ? '(cached)' : ''}`;
+      const tagEp = (season != null && episode != null) ? ` · S${season} E${episode}` : '';
+      statusEl.textContent = `${firstServerLabel}${tagEp} · Active stream player ${s.cached ? '(cached)' : ''}`;
 
       // Server switcher pills
       if(srvBox && s.servers && s.servers.length > 1){
@@ -2586,7 +3398,7 @@ async function fetchStream(id, fresh = false){
             setIframeSrc(srv.url);
             srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))} · Active stream player`;
+            statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))}${tagEp} · Active stream player`;
           };
           srvBox.appendChild(btn);
         });
@@ -2607,9 +3419,10 @@ async function fetchStream(id, fresh = false){
       if(fw) fw.style.display = 'inline-flex';
       if(cc) cc.style.display = 'inline-flex';
       statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min) ${s.cached ? '(cached)' : ''}`;
-      attach(playUrl);
+      attach(playUrl, kind);
     }
   } catch(err) {
+    clearTimeout(slowNoticeTimer);
     clearTimeout(timeoutId);
     if(err.name === 'AbortError') return;
     if(mySeq !== currentResolveSeq) return;
@@ -2633,8 +3446,16 @@ async function selfHeal(){
   setTimeout(()=>{ refreshing = false; }, 1500);
 }
 
-function attach(url){
+function attach(url, kind='hls'){
   if(url && url.startsWith('/') && API_BASE) url = API_BASE + url;
+  if(kind === 'video'){
+    if(hls){ hls.destroy(); hls = null; }
+    video.src = url;
+    tryApplySeek();
+    video.play().catch(()=>{});
+    video.onerror = ()=>selfHeal();
+    return;
+  }
   if(video.canPlayType('application/vnd.apple.mpegurl')){
     video.src = url;
     tryApplySeek();
@@ -2652,7 +3473,10 @@ function attach(url){
     enableWorker: true,
     lowLatencyMode: false,
     nudgeMaxRetry: 5,
-    nudgeOffset: 0.2
+    nudgeOffset: 0.2,
+    xhrSetup: function(xhr, url) {
+      xhr.withCredentials = true;
+    }
   });
 
   hls.loadSource(url);
@@ -2687,6 +3511,18 @@ function attach(url){
 }
 
 function closePlayer(triggerHistoryBack = true){
+  dismissNextEpisodeToast();
+  const btnNext = document.getElementById('btn-next-ep');
+  if(btnNext) btnNext.style.display = 'none';
+  const fsBtn = document.getElementById('fs-btn-next-ep');
+  if(fsBtn) fsBtn.style.display = 'none';
+  const fsFloatBtn = document.getElementById('fs-floating-next-btn');
+  if(fsFloatBtn) fsFloatBtn.style.display = 'none';
+  const fsTopBar = document.getElementById('fs-top-bar');
+  if(fsTopBar){ fsTopBar.style.display = 'none'; fsTopBar.classList.remove('fs-visible'); }
+  if(playerContainer) playerContainer.classList.remove('fs-idle');
+  clearTimeout(fsActivityTimer);
+  currentSeriesData = null;
   savePlaybackProgress(true);
   dismissResumePrompt();
   targetSeekTime = 0;
@@ -2764,22 +3600,88 @@ function isBackOrExitKey(e){
   return false;
 }
 
+let fsActivityTimer = null;
+function triggerFsActivity(){
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  if(!isFs) return;
+  const fsTopBar = document.getElementById('fs-top-bar');
+  if(playerContainer) playerContainer.classList.remove('fs-idle');
+  if(fsTopBar) fsTopBar.classList.add('fs-visible');
+  clearTimeout(fsActivityTimer);
+  fsActivityTimer = setTimeout(()=>{
+    const isStillFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+    if(isStillFs){
+      if(playerContainer) playerContainer.classList.add('fs-idle');
+      if(fsTopBar) fsTopBar.classList.remove('fs-visible');
+    }
+  }, 4000);
+}
+
 function togglePlayerFullscreen(){
   const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
   if(isFs){
     const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
     if(ex) ex.call(document).catch(()=>{});
   } else {
-    if(pIframe && pIframe.style.display !== 'none'){
-      const req = pIframe.requestFullscreen || pIframe.webkitRequestFullscreen || pIframe.mozRequestFullScreen || pIframe.msRequestFullscreen;
-      if(req) req.call(pIframe).catch(()=>{});
-    } else if(video && video.style.display !== 'none'){
-      const req = video.requestFullscreen || video.webkitRequestFullscreen || video.mozRequestFullScreen || video.msRequestFullscreen || (playerContainer && playerContainer.requestFullscreen);
-      if(req) req.call(video).catch(()=>{});
+    // Request fullscreen on playerContainer so all overlays (Next Episode, HUD, Top Bar) are rendered in fullscreen
+    const target = playerContainer || pIframe || video;
+    const req = target.requestFullscreen || target.webkitRequestFullscreen || target.mozRequestFullScreen || target.msRequestFullscreen;
+    if(req){
+      req.call(target).catch(()=>{
+        if(pIframe && pIframe.style.display !== 'none') pIframe.requestFullscreen?.();
+        else if(video && video.style.display !== 'none') video.requestFullscreen?.();
+      });
     }
   }
 }
 function toggleAskFullscreen(){ togglePlayerFullscreen(); }
+
+function handleFsStateChange(){
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  updateFullscreenBtn();
+  const fsTopBar = document.getElementById('fs-top-bar');
+  const fsFloatBtn = document.getElementById('fs-floating-next-btn');
+  const next = getNextEpisode();
+
+  if(isFs){
+    // If iframe requested fullscreen on itself, promote to playerContainer if allowed
+    if(document.fullscreenElement === pIframe && playerContainer && playerContainer.requestFullscreen){
+      try { playerContainer.requestFullscreen().catch(()=>{}); } catch(_) {}
+    }
+
+    if(fsTopBar){
+      fsTopBar.style.display = 'flex';
+      fsTopBar.classList.add('fs-visible');
+      const fsTitle = document.getElementById('fs-show-title');
+      if(fsTitle){
+        if(currentSeriesData && currentSeriesData.is_series){
+          const baseTitle = currentSeriesData.title || (window.movieCache?.get(curId)?.title) || '';
+          const cleanBase = baseTitle.replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
+          const sPad = String(activeSeasonNum || 1).padStart(2, '0');
+          const ePad = String(activeEpisodeNum || 1).padStart(2, '0');
+          fsTitle.textContent = `${cleanBase} · S${sPad} E${ePad}`;
+        } else {
+          const curItem = window.movieCache?.get(curId);
+          fsTitle.textContent = curItem?.title || '';
+        }
+      }
+    }
+    if(fsFloatBtn){
+      fsFloatBtn.style.display = next ? 'flex' : 'none';
+    }
+    triggerFsActivity();
+  } else {
+    if(playerContainer) playerContainer.classList.remove('fs-idle');
+    if(fsTopBar){
+      fsTopBar.style.display = 'none';
+      fsTopBar.classList.remove('fs-visible');
+    }
+    if(fsFloatBtn){
+      fsFloatBtn.style.display = 'none';
+    }
+    clearTimeout(fsActivityTimer);
+  }
+}
 
 function updateFullscreenBtn(){
   const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
@@ -2795,8 +3697,10 @@ function updateFullscreenBtn(){
   }
 }
 ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
-  document.addEventListener(evt, updateFullscreenBtn);
+  document.addEventListener(evt, handleFsStateChange);
 });
+window.addEventListener('mousemove', triggerFsActivity);
+window.addEventListener('touchstart', triggerFsActivity, { passive: true });
 
 /* Pre-empt expiry every 25 min (TTL is 30) */
 setInterval(()=>{ if(curId && overlay.classList.contains('on')) selfHeal(); }, 25*60*1000);
@@ -2875,7 +3779,37 @@ window.addEventListener('keydown', (e)=>{
     e.preventDefault();
     toggleCC();
   }
+  // 'n' / 'N' -> Next Episode
+  else if(e.key === 'n' || e.key === 'N'){
+    if(getNextEpisode()){
+      e.preventDefault();
+      playNextEpisode();
+    }
+  }
 }, true);
+
+/* Auto-detect ended event from 3rd-party embed iframes (VidSrc, VidFast, 2Embed, etc.) */
+window.addEventListener('message', (event) => {
+  try {
+    let data = event.data;
+    if(typeof data === 'string'){
+      try { data = JSON.parse(data); } catch(_) {}
+    }
+    if(!data) return;
+
+    const evt = (data.event || data.type || data.action || data.status || '').toString().toLowerCase();
+    const isEnded = evt === 'ended' || evt === 'finish' || evt === 'complete' || evt === 'playback_ended' || evt === 'media_ended';
+    const curTime = Number(data.currentTime || (data.data && data.data.currentTime) || 0);
+    const totalDuration = Number(data.duration || (data.data && data.data.duration) || 0);
+    const isNearEnd = (totalDuration > 30 && curTime >= totalDuration - 2);
+
+    if(isEnded || isNearEnd){
+      if(currentSeriesData && currentSeriesData.is_series && getNextEpisode()){
+        showNextEpisodeToast();
+      }
+    }
+  } catch(_) {}
+});
 
 /* TV Remote D-Pad Navigation & Smooth Scroll System */
 window._isDpadNavigating = false;
@@ -3089,7 +4023,7 @@ async function renderSearchDropdown(query){
 
     let html = data.items.map((m, idx)=>`
       <div class="s-item" data-idx="${idx}" onclick="selectSearchMovie(${m.id})">
-        <img class="s-thumb" src="${esc(m.poster)}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2238%22 height=%2254%22 fill=%22%23222%22><rect width=%22100%%22 height=%22100%%22/></svg>'">
+        <img class="s-thumb" src="${esc((m.poster && !m.poster.includes('logo.png') && !m.poster.startsWith('/assets/')) ? m.poster : 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 38 54%22 width=%2238%22 height=%2254%22><rect width=%22100%%22 height=%22100%%22 fill=%22%23181b24%22/><circle cx=%2219%22 cy=%2227%22 r=%2212%22 fill=%22%23ea580c%22 opacity=%220.35%22/><text x=%2219%22 y=%2231%22 font-size=%2213%22 text-anchor=%22middle%22 fill=%22%23fff%22>🎬</text></svg>'))}" loading="lazy" alt="" data-source="${esc(m.source||'')}" onerror="handleThumbImgError(this)">
         <div class="s-info">
           <div class="s-title">${esc(m.title)}</div>
           <div class="s-meta">
