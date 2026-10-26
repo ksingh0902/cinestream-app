@@ -1430,18 +1430,30 @@ select:focus {
   }
 }
 
+/* Background scroll-lock when modal is open */
+html.modal-open,
+body.modal-open {
+  overflow: hidden !important;
+  height: 100% !important;
+  max-height: 100vh !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+}
+
 /* Video Player Overlay Modal */
 #overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 9, 12, 0.94);
+  background: rgba(8, 9, 12, 0.96);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 40;
   display: none;
-  padding: 16px 20px 80px;
-  overflow-y: scroll;
-  overflow-x: hidden;
+  padding: 16px 20px 100px;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  touch-action: pan-y !important;
   box-sizing: border-box;
   width: 100%;
   max-width: 100vw;
@@ -1450,6 +1462,49 @@ select:focus {
 }
 #overlay.on {
   display: block;
+}
+#overlay::-webkit-scrollbar {
+  width: 10px;
+}
+#overlay::-webkit-scrollbar-track {
+  background: rgba(18, 20, 26, 0.95);
+  border-radius: 5px;
+}
+#overlay::-webkit-scrollbar-thumb {
+  background: rgba(255, 123, 57, 0.55);
+  border-radius: 5px;
+  border: 2px solid rgba(18, 20, 26, 0.95);
+}
+#overlay::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.btn-scroll-episodes {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgba(24, 26, 32, 0.94);
+  border: 1.5px solid var(--accent);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 12px auto 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 123, 57, 0.35);
+  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+  z-index: 10;
+}
+.btn-scroll-episodes:hover,
+.btn-scroll-episodes:focus,
+.btn-scroll-episodes:focus-visible {
+  transform: scale(1.05);
+  background: var(--accent);
+  color: #fff;
+  outline: 2.5px solid #fff;
+  box-shadow: 0 6px 24px rgba(255, 123, 57, 0.6);
 }
 .box {
   max-width: 880px;
@@ -2226,6 +2281,10 @@ footer {
         <button class="btn-retry" onclick="retryStream()">🔄 Retry Stream</button>
       </div>
     </div>
+    <button id="btn-scroll-episodes" class="btn-scroll-episodes" onclick="scrollModalToEpisodes()" title="Jump down to Episodes &amp; Seasons" tabindex="0">
+      <span id="scroll-episodes-icon">⌄</span>
+      <span id="scroll-episodes-text">Episodes &amp; Seasons</span>
+    </button>
     <div id="series-seasons-wrap" class="series-seasons-wrap" style="display:none;"></div>
     <p class="syn" id="p-syn"></p>
   </div>
@@ -3142,6 +3201,11 @@ async function openPlayer(id){
   activeContentId = sInfo.contentId || `movie_${id}`;
   checkAndShowResumeBanner(activeContentId);
 
+  document.documentElement.classList.add('modal-open');
+  document.body.classList.add('modal-open');
+  const scrollBtn = document.getElementById('btn-scroll-episodes');
+  if(scrollBtn) scrollBtn.style.display = 'none';
+
   overlay.classList.add('on');
   overlay.scrollTop = 0;
   updateFullscreenBtn();
@@ -3429,7 +3493,44 @@ function renderSeasonsUI(){
   `;
   wrap.style.display = 'block';
   updateNextEpisodeBtn();
+  updateEpisodesScrollBtn();
 }
+
+function scrollModalToEpisodes(){
+  const seasonsWrap = document.getElementById('series-seasons-wrap');
+  if(seasonsWrap && seasonsWrap.style.display !== 'none'){
+    const targetTop = Math.max(0, seasonsWrap.offsetTop - 30);
+    overlay.scrollTo({ top: targetTop, behavior: 'smooth' });
+    const tab = seasonsWrap.querySelector('.season-tab-btn.active') || seasonsWrap.querySelector('.season-tab-btn') || seasonsWrap.querySelector('.ep-chip.active');
+    if(tab) setTimeout(()=>tab.focus(), 250);
+  } else {
+    overlay.scrollBy({ top: 320, behavior: 'smooth' });
+  }
+}
+
+function updateEpisodesScrollBtn(){
+  const btn = document.getElementById('btn-scroll-episodes');
+  const seasonsWrap = document.getElementById('series-seasons-wrap');
+  if(!btn) return;
+  if(!seasonsWrap || seasonsWrap.style.display === 'none'){
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = 'inline-flex';
+  const isScrolledDown = overlay.scrollTop > (seasonsWrap.offsetTop - 140);
+  const icon = document.getElementById('scroll-episodes-icon');
+  const text = document.getElementById('scroll-episodes-text');
+  if(isScrolledDown){
+    if(icon) icon.textContent = '⌃';
+    if(text) text.textContent = 'Back to Player';
+    btn.onclick = () => overlay.scrollTo({ top: 0, behavior: 'smooth' });
+  } else {
+    if(icon) icon.textContent = '⌄';
+    if(text) text.textContent = 'Episodes & Seasons';
+    btn.onclick = scrollModalToEpisodes;
+  }
+}
+overlay.addEventListener('scroll', updateEpisodesScrollBtn);
 
 function selectSeasonTab(seasonNum){
   activeSeasonNum = seasonNum;
@@ -3724,6 +3825,10 @@ function closePlayer(triggerHistoryBack = true){
   tokenRefreshTimer = null;
   lastKnownPlayTime = 0;
 
+  document.documentElement.classList.remove('modal-open');
+  document.body.classList.remove('modal-open');
+  const scrollBtn = document.getElementById('btn-scroll-episodes');
+  if(scrollBtn) scrollBtn.style.display = 'none';
   overlay.classList.remove('on');
   updateFullscreenBtn();
   if(triggerHistoryBack && window.location.hash === '#player'){
@@ -4032,26 +4137,24 @@ window.addEventListener('keydown', (e)=>{
       const srvBtn = document.querySelector('#server-switcher button');
       if(document.getElementById('server-switcher')?.style.display !== 'none' && srvBtn){
         srvBtn.focus();
-        srvBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        srvBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
       } else if(hasSeasons){
-        const tab = seasonsWrap.querySelector('.season-tab-btn.active') || seasonsWrap.querySelector('.season-tab-btn');
-        if(tab){
-          tab.focus();
-          tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
+        scrollModalToEpisodes();
       } else {
-        overlay.scrollBy({ top: 200, behavior: 'smooth' });
+        overlay.scrollBy({ top: 220, behavior: 'smooth' });
       }
     } else if(isSrvBtn || isAltBtn){
-      if(hasSeasons){
-        const tab = seasonsWrap.querySelector('.season-tab-btn.active') || seasonsWrap.querySelector('.season-tab-btn');
-        if(tab){
-          tab.focus();
-          tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
+      const scrollBtn = document.getElementById('btn-scroll-episodes');
+      if(scrollBtn && scrollBtn.style.display !== 'none'){
+        scrollBtn.focus();
+        scrollBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else if(hasSeasons){
+        scrollModalToEpisodes();
       } else {
-        overlay.scrollBy({ top: 200, behavior: 'smooth' });
+        overlay.scrollBy({ top: 220, behavior: 'smooth' });
       }
+    } else if(active && active.id === 'btn-scroll-episodes'){
+      scrollModalToEpisodes();
     } else if(isSeasonBtn){
       const epChips = Array.from(seasonsWrap.querySelectorAll('.episodes-grid .ep-chip'));
       if(epChips.length > 0){
@@ -4109,7 +4212,17 @@ window.addEventListener('keydown', (e)=>{
 
   if(isUp){
     e.preventDefault();
-    if(isEpChip){
+    if(active && active.id === 'btn-scroll-episodes'){
+      const srvBtn = document.querySelector('#server-switcher button');
+      if(srvBtn && document.getElementById('server-switcher')?.style.display !== 'none'){
+        srvBtn.focus();
+        srvBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else {
+        const topBtn = document.getElementById('btn-fullscreen') || document.querySelector('#overlay .btn-group button');
+        if(topBtn) topBtn.focus();
+        overlay.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else if(isEpChip){
       const epChips = Array.from(seasonsWrap.querySelectorAll('.episodes-grid .ep-chip'));
       const idx = epChips.indexOf(active);
       if(idx !== -1){
@@ -4134,31 +4247,35 @@ window.addEventListener('keydown', (e)=>{
         const prevIdx = idx - cols;
         if(prevIdx >= 0){
           epChips[prevIdx].focus();
-          epChips[prevIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          epChips[prevIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
         } else {
           const tab = seasonsWrap.querySelector('.season-tab-btn.active') || seasonsWrap.querySelector('.season-tab-btn');
           if(tab){
             tab.focus();
-            tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            tab.scrollIntoView({ block: 'center', behavior: 'smooth' });
           }
         }
       }
     } else if(isSeasonBtn){
-      const topBtn = document.getElementById('btn-fullscreen') || document.querySelector('#overlay .btn-group button');
-      if(topBtn){
-        topBtn.focus();
-        topBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      const scrollBtn = document.getElementById('btn-scroll-episodes');
+      if(scrollBtn && scrollBtn.style.display !== 'none'){
+        scrollBtn.focus();
+        scrollBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else {
+        const topBtn = document.getElementById('btn-fullscreen') || document.querySelector('#overlay .btn-group button');
+        if(topBtn){
+          topBtn.focus();
+        }
+        overlay.scrollTo({ top: 0, behavior: 'smooth' });
       }
-      overlay.scrollTo({ top: 0, behavior: 'smooth' });
     } else if(isSrvBtn || isAltBtn){
       const topBtn = document.getElementById('btn-fullscreen') || document.querySelector('#overlay .btn-group button');
       if(topBtn){
         topBtn.focus();
-        topBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
       overlay.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-      overlay.scrollBy({ top: -200, behavior: 'smooth' });
+      overlay.scrollBy({ top: -220, behavior: 'smooth' });
     }
     return;
   }
@@ -4290,6 +4407,14 @@ window.addEventListener('message', (event) => {
 
 /* TV Remote D-Pad Navigation & Smooth Scroll System */
 window._isDpadNavigating = false;
+
+// Intercept mouse wheel, air-mouse, or touchpad scrolling when modal is open to ensure modal scrolls and page underneath NEVER scrolls
+window.addEventListener('wheel', (e) => {
+  if(overlay && overlay.classList.contains('on')){
+    e.preventDefault();
+    overlay.scrollTop += e.deltaY;
+  }
+}, { passive: false });
 
 // Filter bar mouse wheel vertical passthrough (never blocks page scroll)
 const filterBarEl = document.getElementById('filter-bar');
