@@ -2405,6 +2405,8 @@ let targetSeekTime = 0;
 let lastProgressSaveTime = 0;
 let currentSavedProgress = null;
 let isAuthenticated = false;
+let lastKnownPlayTime = 0;
+let tokenRefreshTimer = null;
 
 const StorageManager = {
   isAvailable() {
@@ -2656,6 +2658,7 @@ function tryApplySeek() {
     try {
       const dest = Math.min(targetSeekTime, Math.max(0, video.duration - 2));
       video.currentTime = dest;
+      lastKnownPlayTime = dest;
       showHud(`Resumed from ${formatTime(dest)}`);
       targetSeekTime = 0;
       video.play().catch(()=>{});
@@ -2711,11 +2714,27 @@ function savePlaybackProgress(force = false) {
 }
 
 // Attach playback progress listeners to video element
-video.addEventListener('timeupdate', () => savePlaybackProgress(false));
+video.addEventListener('timeupdate', () => {
+  if (video.currentTime > 3) {
+    lastKnownPlayTime = video.currentTime;
+  }
+  if (targetSeekTime > 0 && Math.abs(video.currentTime - targetSeekTime) > 3) {
+    tryApplySeek();
+  }
+  savePlaybackProgress(false);
+});
 video.addEventListener('pause', () => savePlaybackProgress(true));
-video.addEventListener('seeked', () => savePlaybackProgress(true));
+video.addEventListener('seeked', () => {
+  if (video.currentTime > 3) {
+    lastKnownPlayTime = video.currentTime;
+  }
+  savePlaybackProgress(true);
+});
 video.addEventListener('loadedmetadata', tryApplySeek);
 video.addEventListener('canplay', tryApplySeek);
+video.addEventListener('playing', () => {
+  if (targetSeekTime > 0) tryApplySeek();
+});
 video.addEventListener('ended', () => {
   if (activeContentId) {
     StorageManager.removeItem(activeContentId);
@@ -3553,6 +3572,20 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       if(fw) fw.style.display = 'inline-flex';
       if(cc) cc.style.display = 'inline-flex';
       statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min) ${s.cached ? '(cached)' : ''}`;
+
+      // Preemptively refresh token before upstream expiry (e.g. 2 minutes before 30m or 60m token expires)
+      clearTimeout(tokenRefreshTimer);
+      const ttlSec = s.expires_in || 1800;
+      if(ttlSec > 300){
+        const refreshMs = (ttlSec - 120) * 1000;
+        tokenRefreshTimer = setTimeout(() => {
+          if(video && !video.paused && curId && !refreshing){
+            console.log('Preemptively renewing token before expiry...');
+            selfHeal();
+          }
+        }, refreshMs);
+      }
+
       attach(playUrl, kind);
     }
   } catch(err) {
@@ -3570,18 +3603,34 @@ function retryStream(){
   if(curId) fetchStream(curId, true);
 }
 
-/* Silently renew token on fatal error */
+/* Silently renew token on fatal error or upstream token expiration */
 async function selfHeal(){
   if(refreshing || !curId) return;
   refreshing = true;
-  keepTime = video.currentTime;
-  statusEl.innerHTML = `<span class="spinner"></span> Token refreshed — resuming playback…`;
+  // Retrieve the highest reliable playback time before the stream errored
+  const savedStore = activeContentId ? StorageManager.getItem(activeContentId) : null;
+  const resumeAt = Math.max(
+    (video && !isNaN(video.currentTime) && video.currentTime > 5) ? video.currentTime : 0,
+    lastKnownPlayTime || 0,
+    (savedStore && savedStore.currentTime > 5) ? savedStore.currentTime : 0
+  );
+  if(resumeAt > 3) {
+    targetSeekTime = resumeAt;
+    keepTime = resumeAt;
+    lastKnownPlayTime = resumeAt;
+  }
+  statusEl.innerHTML = `<span class="spinner"></span> Token refreshed — resuming playback${resumeAt > 0 ? ' at ' + formatTime(resumeAt) : ''}…`;
   await fetchStream(curId, true);
-  setTimeout(()=>{ refreshing = false; }, 1500);
+  setTimeout(()=>{ refreshing = false; }, 2000);
 }
 
 function attach(url, kind='hls'){
   if(url && url.startsWith('/') && API_BASE) url = API_BASE + url;
+
+  if(keepTime > 1 && targetSeekTime <= 0){
+    targetSeekTime = keepTime;
+  }
+
   if(kind === 'video'){
     if(hls){ hls.destroy(); hls = null; }
     video.src = url;
@@ -3591,6 +3640,7 @@ function attach(url, kind='hls'){
     return;
   }
   if(video.canPlayType('application/vnd.apple.mpegurl')){
+    if(hls){ hls.destroy(); hls = null; }
     video.src = url;
     tryApplySeek();
     video.play().catch(()=>{});
@@ -3617,10 +3667,10 @@ function attach(url, kind='hls'){
   hls.attachMedia(video);
 
   hls.on(Hls.Events.MANIFEST_PARSED, ()=>{
-    if(keepTime > 1){
-      video.currentTime = keepTime;
-      keepTime = 0;
+    if(keepTime > 1 && targetSeekTime <= 0){
+      targetSeekTime = keepTime;
     }
+    keepTime = 0;
     tryApplySeek();
     video.play().catch(()=>{});
   });
@@ -3630,6 +3680,15 @@ function attach(url, kind='hls'){
   });
 
   hls.on(Hls.Events.ERROR, (_, data)=>{
+    if(!data) return;
+    // Check if upstream HTTP response returned 401/403/410 (token expiration)
+    const httpStatus = data.response?.code || data.context?.xhr?.status || data.response?.status;
+    if(httpStatus === 401 || httpStatus === 403 || httpStatus === 410){
+      console.warn(`HLS stream token expired (HTTP ${httpStatus}), triggering self-heal with fresh token...`);
+      selfHeal();
+      return;
+    }
+
     if(!data.fatal) return;
     if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
       console.warn('HLS Network error during seek/buffer, recovering...', data);
@@ -3661,6 +3720,9 @@ function closePlayer(triggerHistoryBack = true){
   dismissResumePrompt();
   targetSeekTime = 0;
   activeContentId = null;
+  clearTimeout(tokenRefreshTimer);
+  tokenRefreshTimer = null;
+  lastKnownPlayTime = 0;
 
   overlay.classList.remove('on');
   updateFullscreenBtn();
