@@ -4,7 +4,6 @@ import logging
 import sqlite3
 import time
 from enum import Enum
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import config
@@ -18,6 +17,7 @@ from .config import (
     get_setup_lockfile_path,
 )
 from .security import hash_password
+from .database import connect as get_db_connection, lock_initialization
 
 logger = logging.getLogger("cinemymovies.auth.store")
 
@@ -68,23 +68,10 @@ CREATE TABLE IF NOT EXISTS auth_meta (
 """
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Connect to SQLite database with WAL journal mode, busy timeout, and row_factory."""
-    db_path = getattr(config, "AUTH_DB_PATH", None) or "cinemymovies.sqlite3"
-    p = Path(db_path)
-    if not p.parent.exists():
-        p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p), timeout=30.0)
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def write_setup_lockfile() -> None:
-    """Write persistent setup lockfile to disk."""
+    """Retain a local development lock marker; production uses shared database state."""
+    if config.AUTH_DATABASE_URL:
+        return
     try:
         lock_path = get_setup_lockfile_path()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,10 +82,7 @@ def write_setup_lockfile() -> None:
 
 def has_setup_lockfile() -> bool:
     """Check if the persistent setup lockfile exists."""
-    try:
-        return get_setup_lockfile_path().exists()
-    except Exception:
-        return False
+    return get_setup_lockfile_path().exists()
 
 
 def get_meta_value(key: str) -> Optional[str]:
@@ -117,54 +101,21 @@ def set_meta_value(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def get_auth_system_state() -> Tuple[AuthSystemState, Optional[str]]:
-    """
-    Evaluate the global authentication system status:
-    1. STORAGE_UNAVAILABLE: Database connection or query failed due to I/O, lock, or disk failure.
-    2. INITIALIZED: Setup has already been completed, OR valid credentials exist in DB, OR bootstrap env vars are present.
-    3. GENUINELY_UNINITIALIZED: Storage is healthy, but no users exist, setup has not been performed, and no credentials in env.
-    """
     try:
         with get_db_connection() as conn:
-            conn.executescript(DDL_STATEMENTS)
-
-            # 1. Check for explicit setup_completed flag in auth_meta
-            row_meta = conn.execute("SELECT value FROM auth_meta WHERE key = 'setup_completed'").fetchone()
-            is_meta_completed = row_meta and row_meta["value"] == "1"
-
-            # 2. Check existing user credentials
-            admin_user = conn.execute("SELECT username, password_hash FROM auth_users WHERE role = 'admin' LIMIT 1").fetchone()
-            viewer_user = conn.execute("SELECT username, password_hash FROM auth_users WHERE role = 'viewer' LIMIT 1").fetchone()
-
-            has_valid_admin = bool(admin_user and admin_user["password_hash"])
-            has_valid_viewer = bool(viewer_user and viewer_user["password_hash"])
-
-            # If users already exist in DB, heal and enforce INITIALIZED state
-            if has_valid_admin or is_meta_completed:
-                if not is_meta_completed and has_valid_admin:
-                    set_meta_value(conn, "setup_completed", "1")
-                    conn.commit()
-                    logger.info("Auto-healed setup_completed flag from existing admin user.")
-                if not has_setup_lockfile():
-                    write_setup_lockfile()
+            marker = conn.execute("SELECT value FROM auth_meta WHERE key = 'setup_completed'").fetchone()
+            users = conn.execute("SELECT password_hash, role FROM auth_users").fetchall()
+            valid = any(u["password_hash"] and u["role"] in ("admin", "viewer") for u in users)
+            if valid:
                 return AuthSystemState.INITIALIZED, None
-
-            # 3. If environment credentials provided, bootstrap and return INITIALIZED
-            if ADMIN_INITIAL_PASSWORD or VIEWER_INITIAL_PASSWORD:
-                init_auth_db()
-                return AuthSystemState.INITIALIZED, None
-
-            # 4. Check if setup lockfile exists on disk
-            if has_setup_lockfile():
-                set_meta_value(conn, "setup_completed", "1")
-                conn.commit()
-                return AuthSystemState.INITIALIZED, None
-
-            # 5. Genuine first-time uninitialized
+            if users or (marker and marker["value"] == "1") or (not config.AUTH_DATABASE_URL and has_setup_lockfile()):
+                return AuthSystemState.STORAGE_UNAVAILABLE, "Existing authentication records require recovery"
+            if not config.ALLOW_PUBLIC_SETUP:
+                return AuthSystemState.STORAGE_UNAVAILABLE, "Authentication must be provisioned by the operator"
             return AuthSystemState.GENUINELY_UNINITIALIZED, None
-
-    except (sqlite3.Error, OSError, Exception) as e:
-        logger.error("Auth storage failure during state check: %s", e)
-        return AuthSystemState.STORAGE_UNAVAILABLE, str(e)
+    except Exception:
+        logger.exception("Authentication storage state check failed")
+        return AuthSystemState.STORAGE_UNAVAILABLE, "Authentication storage unavailable"
 
 
 def is_setup_completed() -> bool:
@@ -183,6 +134,8 @@ def complete_initial_setup(
     Complete initial setup by setting admin and viewer passwords.
     PERMANENTLY LOCKED once initialized. Never allows public reinitialization or overwriting existing credentials.
     """
+    if not config.ALLOW_PUBLIC_SETUP:
+        return False, "Public setup is permanently locked."
     state, err = get_auth_system_state()
     if state == AuthSystemState.STORAGE_UNAVAILABLE:
         return False, f"Authentication storage is currently unavailable: {err}"
@@ -195,15 +148,20 @@ def complete_initial_setup(
     if not viewer_password or len(viewer_password) < 6:
         return False, "Shared viewer password must be at least 6 characters long."
 
+    admin_username = admin_username.strip() or "admin"
+    viewer_username = viewer_username.strip() or "viewer"
+    if admin_username == viewer_username:
+        return False, "Admin and viewer usernames must differ."
     now = int(time.time())
     admin_hash = hash_password(admin_password)
     viewer_hash = hash_password(viewer_password)
 
     try:
         with get_db_connection() as conn:
-            # Check atomically inside transaction if any user exists
-            existing_count = conn.execute("SELECT COUNT(*) FROM auth_users WHERE role IN ('admin', 'viewer')").fetchone()[0]
-            if existing_count > 0:
+            lock_initialization(conn)
+            existing_count = conn.execute("SELECT COUNT(*) AS cnt FROM auth_users").fetchone()["cnt"]
+            marker = conn.execute("SELECT value FROM auth_meta WHERE key = 'setup_completed'").fetchone()
+            if existing_count > 0 or (marker and marker["value"] == "1"):
                 return False, "Setup is permanently locked. Existing credentials cannot be overwritten."
 
             conn.execute(
@@ -232,56 +190,19 @@ def complete_initial_setup(
         return True, None
     except (sqlite3.Error, OSError) as e:
         logger.error("Failed to complete initial setup due to storage error: %s", e)
-        return False, f"Failed to save credentials: {e}"
+        raise
 
 
 def init_auth_db() -> None:
-    """Initialize auth tables and bootstrap initial credentials if provided in env, preserving existing credentials."""
+    """Create schema without recreating production credentials on startup."""
     try:
         with get_db_connection() as conn:
+            lock_initialization(conn)
             conn.executescript(DDL_STATEMENTS)
-            conn.commit()
-
-            now = int(time.time())
-
-            # Check if admin already exists
-            existing_admin = conn.execute("SELECT username, password_hash FROM auth_users WHERE role = 'admin' LIMIT 1").fetchone()
-            if not existing_admin and ADMIN_INITIAL_PASSWORD:
-                admin_hash = hash_password(ADMIN_INITIAL_PASSWORD)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'admin', 1, ?, ?)
-                    ON CONFLICT(username) DO NOTHING
-                    """,
-                    (ADMIN_USERNAME, admin_hash, now, now),
-                )
-                set_meta_value(conn, "setup_completed", "1")
-                conn.execute("DELETE FROM auth_login_attempts")
-                logger.info("Administrator account initialized from ADMIN_INITIAL_PASSWORD.")
-            elif existing_admin:
-                # Existing credentials preserved; ensure setup_completed is marked
-                set_meta_value(conn, "setup_completed", "1")
-
-            # Check if viewer already exists
-            existing_viewer = conn.execute("SELECT username, password_hash FROM auth_users WHERE role = 'viewer' LIMIT 1").fetchone()
-            if not existing_viewer and VIEWER_INITIAL_PASSWORD:
-                viewer_hash = hash_password(VIEWER_INITIAL_PASSWORD)
-                conn.execute(
-                    """
-                    INSERT INTO auth_users (username, password_hash, role, auth_version, created_at, updated_at)
-                    VALUES (?, ?, 'viewer', 1, ?, ?)
-                    ON CONFLICT(username) DO NOTHING
-                    """,
-                    (VIEWER_USERNAME, viewer_hash, now, now),
-                )
-                logger.info("Shared viewer account initialized from VIEWER_INITIAL_PASSWORD.")
-
-            conn.commit()
-            if existing_admin or ADMIN_INITIAL_PASSWORD:
-                write_setup_lockfile()
-    except Exception as e:
-        logger.error("Error during init_auth_db: %s", e)
+        if config.ALLOW_PUBLIC_SETUP and ADMIN_INITIAL_PASSWORD and VIEWER_INITIAL_PASSWORD:
+            complete_initial_setup(ADMIN_INITIAL_PASSWORD, VIEWER_INITIAL_PASSWORD)
+    except Exception:
+        logger.exception("Authentication initialization failed; requests will fail closed")
 
 
 def get_user(username: str) -> Optional[Dict[str, Any]]:

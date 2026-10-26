@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from urllib.parse import quote
 
 from fastapi import Request, Response
@@ -16,6 +17,13 @@ from .templates import render_storage_error_page
 logger = logging.getLogger("cinemymovies.auth.middleware")
 
 
+try:
+    import psycopg
+    DB_STORAGE_ERRORS = (sqlite3.Error, OSError, psycopg.Error)
+except ImportError:
+    DB_STORAGE_ERRORS = (sqlite3.Error, OSError)
+
+
 class PrivateAccessMiddleware(BaseHTTPMiddleware):
     """
     Server-wide security gate enforcing authentication across all pages,
@@ -27,6 +35,19 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        try:
+            response = await self._dispatch(request, call_next)
+        except DB_STORAGE_ERRORS:
+            logger.exception("Authentication storage failed during request")
+            if request.url.path.startswith('/api/'):
+                response = Response('{"error":"storage_unavailable"}', status_code=503, media_type="application/json")
+            else:
+                response = HTMLResponse(render_storage_error_page(), status_code=503)
+            response.headers['Retry-After'] = '5'
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        return response
+
+    async def _dispatch(self, request: Request, call_next):
         # Allow CORS preflight OPTIONS requests
         if request.method == "OPTIONS":
             return await call_next(request)
@@ -50,7 +71,7 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
         # 3. Handle Storage Failure: deny access and show 503 retry screen (NEVER setup)
         if auth_state == AuthSystemState.STORAGE_UNAVAILABLE:
             if is_html_request:
-                html_body = render_storage_error_page(error_detail=state_err)
+                html_body = render_storage_error_page()
                 resp = HTMLResponse(content=html_body, status_code=503)
                 resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
                 resp.headers["Pragma"] = "no-cache"
@@ -85,6 +106,8 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
 
         # 5. System is INITIALIZED: Setup is permanently locked
         if path == "/setup" or path.startswith("/setup/"):
+            if request.method != "GET":
+                return Response("Initial setup is permanently locked", status_code=403)
             resp = RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
             return resp

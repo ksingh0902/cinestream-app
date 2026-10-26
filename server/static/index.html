@@ -2061,9 +2061,29 @@ window.addEventListener('pagehide', () => savePlaybackProgress(true));
 window.addEventListener('beforeunload', () => savePlaybackProgress(true));
 
 /* Authentication & Session Management */
+function showAuthStorageUnavailable() {
+  if (document.getElementById('auth-storage-unavailable')) return;
+  const panel = document.createElement('div');
+  panel.id = 'auth-storage-unavailable';
+  panel.setAttribute('role', 'alert');
+  panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#10121a;color:white;display:grid;place-content:center;text-align:center;padding:24px';
+  const title = document.createElement('h1');
+  title.textContent = 'Service Temporarily Unavailable';
+  const message = document.createElement('p');
+  message.textContent = 'Authentication storage is unavailable. Please retry shortly.';
+  const retry = document.createElement('button');
+  retry.textContent = 'Retry Connection';
+  retry.onclick = () => window.location.reload();
+  panel.append(title, message, retry);
+  document.body.appendChild(panel);
+}
 const _origFetch = window.fetch;
 window.fetch = async function(...args) {
   const resp = await _origFetch.apply(this, args);
+  if (resp && resp.status === 503) {
+    const data = await resp.clone().json().catch(() => null);
+    if (data && data.error === 'storage_unavailable') showAuthStorageUnavailable();
+  }
   if (resp && resp.status === 401) {
     const currentPath = window.location.pathname + window.location.search;
     window.location.replace('/login?next=' + encodeURIComponent(currentPath));
@@ -2090,6 +2110,7 @@ function performLogout() {
 async function checkAuthSession() {
   try {
     const r = await _origFetch('/api/auth/check');
+    if (r.status === 503) { showAuthStorageUnavailable(); return; }
     if (r.ok) {
       const data = await r.json();
       if (!data.authenticated) {

@@ -14,7 +14,10 @@ from config import DB_PATH
 logger = logging.getLogger("cinemymovies.auth")
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
-IS_PRODUCTION = ENVIRONMENT == "production"
+IS_PRODUCTION = ENVIRONMENT == "production" or os.getenv("RENDER", "").lower() == "true"
+AUTH_DATABASE_URL = os.getenv("AUTH_DATABASE_URL", "").strip()
+# Public setup is a local-development convenience only. Production is provisioned offline.
+ALLOW_PUBLIC_SETUP = not IS_PRODUCTION
 
 # Secret key for HMAC cookie signing.
 # If not provided, a random 32-byte secret is used for the current process lifetime.
@@ -39,19 +42,12 @@ SESSION_COOKIE_NAME = "cms_session"
 CSRF_COOKIE_NAME = "cms_csrf"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", "604800"))  # 7 days
 
-# Persistent storage database resolution
+# Local-development SQLite path. Production always requires shared Postgres.
 def resolve_auth_db_path() -> str:
-    """Resolve durable database path, auto-detecting Render persistent disks or environment configs."""
+    """Resolve the explicit SQLite path without guessing whether a directory is durable."""
     custom = os.getenv("AUTH_DB_PATH", "").strip()
     if custom:
         return custom
-
-    # Check standard Render / Linux persistent volume mount points
-    for mount_dir in ("/var/data", "/data", os.getenv("PERSISTENT_DATA_DIR", "").strip()):
-        if mount_dir and os.path.exists(mount_dir) and os.access(mount_dir, os.W_OK):
-            target = os.path.join(mount_dir, "cinemymovies.sqlite3")
-            logger.info("Using persistent volume mount for auth database: %s", target)
-            return target
 
     if os.path.exists("cinemymovies.sqlite3"):
         return "cinemymovies.sqlite3"

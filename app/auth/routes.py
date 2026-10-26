@@ -118,7 +118,7 @@ async def setup_submit(
         resp.headers["Retry-After"] = "5"
         return resp
     if state == AuthSystemState.INITIALIZED:
-        return RedirectResponse(url="/login?notice=Initial+setup+has+already+been+completed.", status_code=303)
+        return Response("Initial setup is permanently locked", status_code=403)
 
     cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME)
     if not verify_csrf_token(csrf_token, cookie_csrf):
@@ -146,6 +146,14 @@ async def setup_submit(
         viewer_password=viewer_password,
     )
     if not ok:
+        state, _ = get_auth_system_state()
+        if state == AuthSystemState.STORAGE_UNAVAILABLE:
+            resp = HTMLResponse(render_storage_error_page(), status_code=503)
+            resp.headers['Retry-After'] = '5'
+            _set_no_cache(resp)
+            return resp
+        if state == AuthSystemState.INITIALIZED:
+            return Response("Initial setup is permanently locked", status_code=403)
         new_csrf = generate_csrf_token()
         resp = HTMLResponse(
             render_setup_page(csrf_token=new_csrf, error=err or "Setup failed."),

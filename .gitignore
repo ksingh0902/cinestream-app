@@ -30,7 +30,11 @@ __pycache__/
 *.db-shm
 *.db-wal
 # Scratch & Debug
-scratch/
+scratch/*
+!scratch/auth_resilience_app.py
+!scratch/test_auth_durable.py
+!scratch/test_auth_state.py
+!scratch/verify_neon_login.py
 _debug/
 
 
