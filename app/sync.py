@@ -38,6 +38,14 @@ _LAST_SYNC_META = {
     "details": None,
 }
 
+YOMOVIES_OTT_PAGES = [
+    ("/director/netflix/", 39),
+    ("/director/amazon-prime/", 14),
+    ("/director/zee5/", 5),
+    ("/director/hotstar/", 7),
+    ("/director/sonyliv-original/", 3),
+]
+
 YOMOVIES_PAGES = [
     # (relative_path, max_pages)
     ("/", 1),                      # Homepage featured & latest
@@ -50,10 +58,15 @@ YOMOVIES_PAGES = [
     ("/genre/animation/", 100),    # Complete Animation catalogue (stops at last page)
     ("/genre/punjabi/", 1),        # Latest Punjabi
     ("/movies/", 1),               # General movies
-]
+] + YOMOVIES_OTT_PAGES
 
 YOMOVIES_FORCED_GENRES = {
     "/genre/animation/": "Animation",
+    "/director/netflix/": "Netflix",
+    "/director/amazon-prime/": "Amazon Prime",
+    "/director/zee5/": "Zee5",
+    "/director/hotstar/": "Hotstar",
+    "/director/sonyliv-original/": "Sony Liv",
 }
 
 ASK4MOVIE_URLS = [
@@ -186,6 +199,23 @@ def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at
             if old_embs and old_embs != "[]":
                 data["embeds"] = old_embs
 
+        # Retain all existing genres / platform tags so multi-platform titles keep every applicable tag
+        cur.execute("SELECT genres FROM movies WHERE id=?", (movie_id,))
+        old_genres_row = cur.fetchone()
+        if old_genres_row and old_genres_row[0]:
+            try:
+                old_genres_list = json.loads(old_genres_row[0]) if isinstance(old_genres_row[0], str) else old_genres_row[0]
+            except Exception:
+                old_genres_list = [g.strip() for g in str(old_genres_row[0]).split(",") if g.strip()]
+
+            merged_genres = list(genres)
+            existing_lower = {str(g).lower() for g in merged_genres}
+            for old_g in old_genres_list:
+                if str(old_g).lower() not in existing_lower:
+                    merged_genres.append(old_g)
+                    existing_lower.add(str(old_g).lower())
+            data["genres"] = json.dumps(merged_genres)
+
         set_clause = ", ".join(f"{k}=:{k}" for k in data.keys() if k not in ("id", "slug", "source", "source_id"))
         conn.execute(f"UPDATE movies SET {set_clause} WHERE id={movie_id}", data)
 
@@ -198,6 +228,7 @@ def sync_yomovies(
     pages: list[tuple[str, int]] | None = None,
     base_url: str | None = None,
     enrich_details: bool = True,
+    force_refresh: bool = True,
 ) -> Dict[str, int]:
     """Sync latest items from Yomovies."""
     base_url = (base_url or (SITE_MIRRORS[0] if SITE_MIRRORS else "https://yomovies.wine")).rstrip("/")
@@ -217,7 +248,7 @@ def sync_yomovies(
             else:
                 url = f"{base_url}{path}" if p == 1 else f"{base_url}{path}page/{p}/"
             try:
-                html = http.get(url, force=True)
+                html = http.get(url, force=force_refresh)
                 cards = parse_listing(html, base_url)
                 if not cards:
                     break
@@ -232,6 +263,16 @@ def sync_yomovies(
                             genres.append(forced_genre)
                         c["genres"] = genres
                     if u:
+                        if u in listing_by_url:
+                            prev_genres = listing_by_url[u].get("genres") or []
+                            cur_genres = c.get("genres") or []
+                            merged_card_genres = list(prev_genres)
+                            existing_g_lower = {str(g).lower() for g in merged_card_genres}
+                            for g in cur_genres:
+                                if str(g).lower() not in existing_g_lower:
+                                    merged_card_genres.append(g)
+                                    existing_g_lower.add(str(g).lower())
+                            c["genres"] = merged_card_genres
                         listing_by_url[u] = c
                     if u and u not in seen:
                         seen.add(u)
@@ -257,6 +298,13 @@ def sync_yomovies(
             info = listing_by_url.get(u)
             if not info or not info.get("title"):
                 continue
+            genres = info.get("genres") or []
+            existing_genres = {str(genre).lower() for genre in genres}
+            for forced_genre in forced_genres_by_url.get(u, set()):
+                if forced_genre.lower() not in existing_genres:
+                    genres.append(forced_genre)
+                    existing_genres.add(forced_genre.lower())
+            info["genres"] = genres
             is_new_overall = False
             for conn in conns:
                 if upsert_yomovies_item(conn, info, base_time - idx):

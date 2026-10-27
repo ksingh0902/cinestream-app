@@ -29,7 +29,7 @@ EROTIC_REGEX = re.compile(
     r"bigshots|big\s+shots|hotx|hotshots|hot\s+shots|cineprime|cine\s+prime|"
     r"rabbit\s+movies?|rabbit\s+original|voovi|"
     r"redprime|red\s+prime|feelit|yessma|jalva|huntcinema|mastiplay|bulbulplay|kaddu|"
-    r"desiprime|atrangii|jugnutv|"
+    r"desiprime|atrangii|jugnutv|tempt(?:\s+originals?|\s+app)?|honeymoon\s+couples|"
     r"hot\s+series|hot\s+web\s*series|softcore|adult\s+series|adult\s+web\s*series|"
     r"erotic\s+movies?|erotic\s+web\s*series|"
     r"hotx\s+originals?\s+uncut|\(uncut\)|\[uncut\]"
@@ -47,6 +47,7 @@ def is_erotic_content(item: dict) -> bool:
     """
     title = str(item.get("title") or "")
     url = str(item.get("url") or item.get("detail_url") or "")
+    synopsis = str(item.get("synopsis") or "")
     genres = item.get("genres") or []
     if isinstance(genres, list):
         genres_str = " ".join(str(g) for g in genres)
@@ -61,7 +62,7 @@ def is_erotic_content(item: dict) -> bool:
     if "erotic movies" in genres_l or "hot series" in genres_l:
         return True
 
-    full_text = f"{title} {url} {genres_str}"
+    full_text = f"{title} {url} {genres_str} {synopsis}"
     return bool(EROTIC_REGEX.search(full_text))
 
 

@@ -139,7 +139,7 @@ input[type="text"], input[type="password"] {{
   border-radius: 8px;
   padding: 11px 14px;
   color: #fff;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   transition: border-color .15s, box-shadow .15s;
 }}

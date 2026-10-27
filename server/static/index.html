@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>CineMyMovies - Stream Movies &amp; Series</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <style>
@@ -21,7 +21,7 @@ html {
   box-sizing: border-box;
   -webkit-text-size-adjust: 100%;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   scroll-behavior: smooth;
@@ -33,7 +33,7 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   overflow-x: hidden;
   min-height: 100vh;
   position: relative;
@@ -48,42 +48,54 @@ header {
   position: sticky;
   top: 0;
   z-index: 25;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 18px;
   background: #0e0f13f0;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid #1c1f26;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
+  box-sizing: border-box;
 }
-.header-top-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-h1 {
-  font-size: 20px;
-  margin: 0;
-  color: var(--accent);
-  cursor: pointer;
-  user-select: none;
-  transition: transform .15s;
-  flex-shrink: 0;
-  letter-spacing: -0.3px;
-  font-weight: 800;
-}
-h1:hover {
-  transform: scale(1.03);
-}
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+
+@media (min-width: 601px) {
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 24px;
+  }
+  .header-top-row {
+    display: contents;
+  }
+  h1 {
+    order: 1;
+    font-size: 22px;
+    margin: 0;
+    color: var(--accent);
+    cursor: pointer;
+    user-select: none;
+    transition: transform .15s;
+    flex-shrink: 0;
+    letter-spacing: -0.3px;
+    font-weight: 800;
+  }
+  .search-wrap {
+    order: 2;
+    flex: 1;
+    max-width: 520px;
+    margin: 0 auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .header-controls {
+    order: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
 }
 select {
   background: var(--card);
@@ -99,6 +111,17 @@ select {
 }
 select:focus {
   border-color: var(--accent);
+}
+optgroup {
+  background: #14161d;
+  color: var(--accent);
+  font-weight: 700;
+  font-style: normal;
+}
+option {
+  background: #181a20;
+  color: var(--txt);
+  padding: 4px 6px;
 }
 .btn-density {
   display: none; /* Auto-shown on mobile screens via media query */
@@ -162,35 +185,62 @@ select:focus {
 }
 #q {
   width: 100%;
-  padding: 8px 30px 8px 34px;
+  padding: 8px 56px 8px 34px;
   background: var(--card);
   border: 1px solid var(--border);
   color: var(--txt);
   border-radius: 8px;
   outline: none;
-  font-size: 13.5px;
+  font-size: 16px; /* 16px strictly prevents iOS Safari from auto-zooming on focus */
   transition: border-color .15s, box-shadow .15s;
 }
 #q:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
+#q::-webkit-search-cancel-button,
+#q::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.q-spinner {
+  position: absolute;
+  right: 32px;
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(234, 88, 12, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: qSpin 0.6s linear infinite;
+  display: none;
+  pointer-events: none;
+  z-index: 2;
+}
+@keyframes qSpin {
+  to { transform: rotate(360deg); }
+}
 .q-clear {
   position: absolute;
-  right: 8px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
   background: none;
   border: none;
   color: var(--dim);
   font-size: 18px;
   cursor: pointer;
-  padding: 2px 6px;
   line-height: 1;
   display: none;
-  border-radius: 4px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all .15s ease;
+  z-index: 2;
 }
-.q-clear:hover {
+.q-clear:hover,
+.q-clear:active {
   color: #fff;
-  background: #ffffff15;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* Horizontal Category Filter Bar - Strictly Pan X without blocking vertical scroll */
@@ -207,7 +257,8 @@ select:focus {
   overscroll-behavior-y: auto;
   align-items: center;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .filter-bar::-webkit-scrollbar {
   display: none;
@@ -236,6 +287,48 @@ select:focus {
   color: #fff;
   border-color: var(--accent);
   box-shadow: 0 3px 12px rgba(255,123,57,0.36);
+}
+.pill-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #14161d;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f472b6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 12px;
+  padding: 6px 30px 6px 14px;
+  border: 1.5px solid #ec4899 !important;
+  color: #f472b6 !important;
+  font-weight: 700;
+  border-radius: 9999px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  height: 33px;
+  line-height: 1;
+  transition: all .15s ease;
+  user-select: none;
+  flex-shrink: 0;
+}
+.pill-select:hover {
+  background-color: rgba(236, 72, 153, 0.16) !important;
+  border-color: #ec4899 !important;
+  color: #fff !important;
+}
+.pill-select:focus {
+  border-color: #ec4899 !important;
+  box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.35);
+}
+.pill-select.active {
+  background-color: #db2777 !important;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 11px center !important;
+  background-size: 12px !important;
+  border-color: #ec4899 !important;
+  color: #fff !important;
+  font-weight: 700;
+  box-shadow: 0 3px 12px rgba(219, 39, 119, 0.45) !important;
 }
 .pill-all {
   border-color: #ea580c !important;
@@ -493,7 +586,7 @@ select:focus {
 .cw-section {
   padding: 8px 14px 4px;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   box-sizing: border-box;
 }
 .cw-header {
@@ -909,7 +1002,7 @@ select:focus {
 #grid {
   display: grid;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   box-sizing: border-box;
   overflow-x: hidden;
   transition: opacity .15s;
@@ -1160,84 +1253,107 @@ select:focus {
 /* Breakpoint 3: Mobile Screens (<= 600px) - Perfectly fitted responsive cards with zero overflow */
 @media (max-width: 600px) {
   header {
+    display: flex;
     flex-direction: column;
     align-items: stretch;
-    padding: 8px 10px;
-    gap: 7px;
+    padding: 10px 12px;
+    gap: 8px;
     width: 100%;
-    max-width: 100vw;
+    max-width: 100%;
     box-sizing: border-box;
     overflow: hidden;
   }
   .header-top-row {
+    display: flex;
     width: 100%;
     max-width: 100%;
     justify-content: space-between;
-    gap: 6px;
+    align-items: center;
     box-sizing: border-box;
   }
   h1 {
-    font-size: 16px;
-    letter-spacing: -0.3px;
+    font-size: 19px;
+    letter-spacing: -0.4px;
+    font-weight: 800;
+    margin: 0;
+    color: var(--accent);
+    cursor: pointer;
     flex-shrink: 0;
   }
   .header-controls {
-    gap: 5px;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-  select {
-    padding: 5px 6px;
-    font-size: 11.5px;
-    border-radius: 6px;
-    max-width: 92px;
-    height: 31px;
-    flex-shrink: 1;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
   }
   .btn-density {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 31px;
-    padding: 0 8px;
-    font-size: 11px;
+    height: 33px;
+    padding: 0 10px;
+    font-size: 11.5px;
+    font-weight: 600;
     background: var(--card);
     border: 1px solid var(--border);
     color: var(--dim);
-    border-radius: 6px;
+    border-radius: 7px;
     cursor: pointer;
     flex-shrink: 0;
+  }
+  .btn-auth {
+    height: 33px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 7px;
   }
   .search-wrap {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+    position: relative;
+    display: flex;
+    align-items: center;
   }
   #q {
-    padding: 7px 28px 7px 30px;
-    font-size: 13px;
-    border-radius: 6px;
-    height: 34px;
+    padding: 8px 54px 8px 32px;
+    font-size: 16px !important; /* 16px strictly prevents iOS Safari auto-zoom */
+    border-radius: 8px;
+    height: 40px;
     width: 100%;
     box-sizing: border-box;
   }
   .search-ico {
-    left: 9px;
-    width: 14px;
-    height: 14px;
+    left: 10px;
+    width: 15px;
+    height: 15px;
   }
 
   .filter-bar {
     padding: 8px 10px 4px;
     gap: 5px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }
   .pill {
     padding: 5px 11px;
     font-size: 11.5px;
     border-radius: 14px;
+  }
+  .pill-select {
+    padding: 5px 24px 5px 10px;
+    font-size: 16px !important; /* 16px strictly prevents iOS Safari viewport auto-zoom */
+    height: 30px;
+    border-radius: 9999px;
+    background-size: 11px !important;
+    background-position: right 8px center !important;
+    background-repeat: no-repeat !important;
+  }
+  .pill-select.active {
+    background-size: 11px !important;
+    background-position: right 8px center !important;
+    background-repeat: no-repeat !important;
   }
 
   /* Default beautifully fitted 2-column mobile layout */
@@ -1246,7 +1362,7 @@ select:focus {
     gap: 10px;
     padding: 10px 10px 28px;
     width: 100%;
-    max-width: 100vw;
+    max-width: 100%;
     box-sizing: border-box;
     overflow-x: hidden;
   }
@@ -1341,9 +1457,13 @@ select:focus {
 /* Breakpoint 4: Ultra-narrow screens (<= 330px) */
 @media (max-width: 330px) {
   #grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding: 6px 6px 20px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
   }
   .card-badges {
     top: 4px;
@@ -1470,7 +1590,7 @@ body.modal-open {
   touch-action: pan-y !important;
   box-sizing: border-box;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
 }
@@ -2170,23 +2290,6 @@ body.watch-page .syn { margin:0; line-height:1.65; }
   <div class="header-top-row">
     <h1 onclick="goHome()" title="Go to Home (Newly Added)">CineMyMovies</h1>
     <div class="header-controls">
-      <select id="source-filter" title="Filter by source" onchange="activeSource=this.value; page=1; syncFilterPills(document.getElementById('kind').value, activeGenre, this.value); load();">
-        <option value="" selected>🌐 Sources</option>
-        <option value="yomovies">🎬 ym</option>
-        <option value="ask4movie">🍿 ask</option>
-        <option value="dooflix">▶️ doo</option>
-      </select>
-      <select id="sort" title="Sort catalogue">
-        <option value="recent" selected>⚡ New</option>
-        <option value="year">📅 Year</option>
-        <option value="imdb">★ IMDb</option>
-        <option value="title">🔤 A-Z</option>
-      </select>
-      <select id="kind" title="Filter by type">
-        <option value="" selected>All</option>
-        <option value="0">🎬 Movies</option>
-        <option value="1">📺 Series</option>
-      </select>
       <button id="btn-density" class="btn-density" onclick="toggleDensity()" title="Toggle cards per row (3 or 2)">
         <span id="density-icon">📱 3</span>
       </button>
@@ -2203,13 +2306,18 @@ body.watch-page .syn { margin:0; line-height:1.65; }
       <circle cx="11" cy="11" r="8"></circle>
       <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
     </svg>
-    <input id="q" placeholder="Search movies &amp; series…" autocomplete="off">
-    <button id="q-clear" class="q-clear" onclick="clearSearch()" title="Clear search">&times;</button>
+    <input id="q" type="search" placeholder="Search movies &amp; series…" autocomplete="off" autocorrect="off" autocapitalize="none" enterkeyhint="search">
+    <div id="q-spinner" class="q-spinner" style="display:none;" aria-label="Searching…"></div>
+    <button id="q-clear" class="q-clear" onclick="clearSearch()" title="Clear search" type="button">&times;</button>
     <div id="search-dropdown" class="search-dropdown"></div>
   </div>
+  <!-- Default Catalogue Filter States (Retained in background without UI congestion) -->
+  <input type="hidden" id="sort" value="recent">
+  <input type="hidden" id="kind" value="">
+  <input type="hidden" id="source-filter" value="">
 </header>
 
-<!-- Quick Category / Genre / Source Pill Filter Bar (Horizontally scrollable with touch) -->
+<!-- Quick Primary Category Pill Filter Bar (With Genre dropdown right after Movies) -->
 <nav class="filter-bar" id="filter-bar">
   <button class="pill pill-all active" data-kind="" data-genre="" data-source="" onclick="setQuickFilter('', '', '')">✨ All Titles</button>
   <button class="pill pill-dub" data-kind="" data-genre="Hollywood Dubbed" data-source="" onclick="setQuickFilter('', 'Hollywood Dubbed', '')">🎙️ Hindi Dubbed</button>
@@ -2219,17 +2327,27 @@ body.watch-page .syn { margin:0; line-height:1.65; }
   <button class="pill pill-animation" data-kind="" data-genre="Animation" data-source="" onclick="setQuickFilter('', 'Animation', '')">🎨 Animation</button>
   <button class="pill pill-series" data-kind="1" data-genre="" data-source="" onclick="setQuickFilter('1', '', '')">📺 Web Series</button>
   <button class="pill pill-movies" data-kind="0" data-genre="" data-source="" onclick="setQuickFilter('0', '', '')">🎬 Movies</button>
-  <button class="pill pill-ask" data-kind="" data-genre="" data-source="ask4movie" onclick="setQuickFilter('', '', 'ask4movie')">🍿 ask</button>
-  <button class="pill pill-doo" data-kind="" data-genre="" data-source="dooflix" onclick="setQuickFilter('', '', 'dooflix')">▶️ doo</button>
-  <button class="pill pill-ym" data-kind="" data-genre="" data-source="yomovies" onclick="setQuickFilter('', '', 'yomovies')">🎬 ym</button>
-  <span class="pill-divider"></span>
-  <button class="pill" data-kind="" data-genre="Action" data-source="" onclick="setQuickFilter('', 'Action', '')">💥 Action</button>
-  <button class="pill" data-kind="" data-genre="Comedy" data-source="" onclick="setQuickFilter('', 'Comedy', '')">😂 Comedy</button>
-  <button class="pill" data-kind="" data-genre="Drama" data-source="" onclick="setQuickFilter('', 'Drama', '')">🎭 Drama</button>
-  <button class="pill" data-kind="" data-genre="Thriller" data-source="" onclick="setQuickFilter('', 'Thriller', '')">🔍 Thriller</button>
-  <button class="pill" data-kind="" data-genre="Horror" data-source="" onclick="setQuickFilter('', 'Horror', '')">😱 Horror</button>
-  <button class="pill" data-kind="" data-genre="Romance" data-source="" onclick="setQuickFilter('', 'Romance', '')">❤️ Romance</button>
-  <button class="pill" data-kind="" data-genre="Sci-fi" data-source="" onclick="setQuickFilter('', 'Sci-fi', '')">🚀 Sci-Fi</button>
+  <select class="pill pill-select" id="genre-filter" title="Explore Genres &amp; Sources" onchange="handleGenreFilterChange(this.value)">
+    <option value="" selected>🎭 Genre</option>
+    <optgroup label="── Genres ──">
+      <option value="genre:Action">💥 Action</option>
+      <option value="genre:Comedy">😂 Comedy</option>
+      <option value="genre:Drama">🎭 Drama</option>
+      <option value="genre:Thriller">🔍 Thriller</option>
+      <option value="genre:Horror">😱 Horror</option>
+      <option value="genre:Romance">❤️ Romance</option>
+      <option value="genre:Sci-fi">🚀 Sci-Fi</option>
+      <option value="genre:Adventure">🗺️ Adventure</option>
+      <option value="genre:Crime">🕵️ Crime</option>
+      <option value="genre:Mystery">🔮 Mystery</option>
+      <option value="genre:Fantasy">🧙 Fantasy</option>
+    </optgroup>
+    <optgroup label="── Sources ──">
+      <option value="src:ask4movie">🍿 ask</option>
+      <option value="src:dooflix">▶️ doo</option>
+      <option value="src:yomovies">🎬 ym</option>
+    </optgroup>
+  </select>
 </nav>
 
 <!-- Continue Watching Section -->
@@ -2961,6 +3079,8 @@ function goHome(){
   page = 1;
   activeGenre = '';
   activeSource = '';
+  const gf = document.getElementById('genre-filter');
+  if(gf) gf.value = '';
   const sf = document.getElementById('source-filter');
   if(sf) sf.value = '';
   document.getElementById('q').value = '';
@@ -2975,14 +3095,52 @@ function goHome(){
 
 let activeSource = '';
 
-/* Quick Filter Pills (All, Ask4Movie, YoMovies, Movies, Series, Bollywood, Hollywood...) */
+function handleGenreFilterChange(val){
+  closePlayer();
+  page = 1;
+  const kindVal = document.getElementById('kind').value;
+  if(!val){
+    activeGenre = '';
+    activeSource = '';
+    syncFilterPills(kindVal, '', '');
+  } else if(val.startsWith('src:')){
+    activeSource = val.slice(4);
+    activeGenre = '';
+    syncFilterPills(kindVal, '', activeSource);
+  } else if(val.startsWith('genre:')){
+    activeGenre = val.slice(6);
+    activeSource = '';
+    syncFilterPills(kindVal, activeGenre, '');
+  } else {
+    activeGenre = val;
+    activeSource = '';
+    syncFilterPills(kindVal, activeGenre, '');
+  }
+  window.scrollTo({top: 0, behavior: 'instant'});
+  load();
+}
+window.handleGenreFilterChange = handleGenreFilterChange;
+
+/* Quick Filter Pills (All, Hindi Dubbed, Punjabi, Hollywood, Bollywood, Animation, Series, Movies) */
 function setQuickFilter(kindVal, genreVal, sourceVal = ''){
   closePlayer();
   document.getElementById('kind').value = kindVal;
   activeGenre = genreVal;
   activeSource = sourceVal;
-  const srcSelect = document.getElementById('source-filter');
-  if(srcSelect) srcSelect.value = sourceVal;
+  const gf = document.getElementById('genre-filter');
+  if(gf){
+    if(sourceVal){
+      const srcOpt = gf.querySelector(`option[value="src:${sourceVal}"]`);
+      gf.value = srcOpt ? ('src:' + sourceVal) : '';
+    } else if(genreVal){
+      const genreOpt = gf.querySelector(`option[value="genre:${genreVal}"]`);
+      gf.value = genreOpt ? ('genre:' + genreVal) : '';
+    } else {
+      gf.value = '';
+    }
+  }
+  const sf = document.getElementById('source-filter');
+  if(sf) sf.value = sourceVal;
   page = 1;
   syncFilterPills(kindVal, genreVal, sourceVal);
   window.scrollTo({top: 0, behavior: 'instant'});
@@ -2990,7 +3148,9 @@ function setQuickFilter(kindVal, genreVal, sourceVal = ''){
 }
 
 function syncFilterPills(kindVal, genreVal, sourceVal = ''){
+  const gf = document.getElementById('genre-filter');
   document.querySelectorAll('.filter-bar .pill').forEach(btn => {
+    if(btn.tagName === 'SELECT') return;
     const k = btn.getAttribute('data-kind') || '';
     const g = btn.getAttribute('data-genre') || '';
     const s = btn.getAttribute('data-source') || '';
@@ -3004,6 +3164,19 @@ function syncFilterPills(kindVal, genreVal, sourceVal = ''){
       btn.classList.remove('active');
     }
   });
+  if(gf){
+    if(genreVal || sourceVal){
+      const hasMatchingGenre = gf.querySelector(`option[value="genre:${genreVal}"]`);
+      const hasMatchingSrc = gf.querySelector(`option[value="src:${sourceVal}"]`);
+      if(hasMatchingGenre || hasMatchingSrc){
+        gf.classList.add('active');
+      } else {
+        gf.classList.remove('active');
+      }
+    } else {
+      gf.classList.remove('active');
+    }
+  }
 }
 
 /* Enhanced Pagination Navigation */
@@ -3085,7 +3258,7 @@ async function load(){
     per_page: 48,
     sort: document.getElementById('sort').value
   });
-  const src = document.getElementById('source-filter')?.value || activeSource || '';
+  const src = activeSource || (document.getElementById('source-filter')?.value || '');
   if(src) p.set('source', src);
   const q = document.getElementById('q').value.trim(); if(q) p.set('q',q);
   const k = document.getElementById('kind').value; if(k!=='') p.set('series',k);
@@ -3125,7 +3298,7 @@ async function load(){
           <span>${esc(m.year||'')}${m.language ? ' · ' + esc(m.language) : ''}</span>
           <span>${m.imdb ? '★ ' + esc(m.imdb) : (m.rating ? '★ ' + esc(m.rating) : '')}</span>
         </div>
-      </div>`).join('') || '<p style="padding:40px 20px;grid-column:1/-1;text-align:center;color:var(--dim)">No titles found in this category.</p>';
+      </div>`).join('') || `<p style="padding:40px 20px;grid-column:1/-1;text-align:center;color:var(--dim)">${q ? `No titles found matching "<strong>${esc(q)}</strong>".` : 'No titles found in this category.'}</p>`;
 
     renderPager(lastTotal, lastPerPage, d.page || page);
     if(footerEl) footerEl.style.display = 'block';
@@ -3148,7 +3321,10 @@ async function load(){
       </div>`;
     if(footerEl) footerEl.style.display = 'block';
   } finally {
-    if(requestSeq === catalogRequestSeq) grid.classList.remove('loading');
+    if(requestSeq === catalogRequestSeq){
+      grid.classList.remove('loading');
+      hideSearchSpinner();
+    }
   }
 }
 
@@ -4738,37 +4914,51 @@ window.addEventListener('keydown', (e)=>{
   }
 });
 
-/* Search Bar Dropdown System across Movies */
+/* Search Bar Dropdown & Real-time Live Grid Search System */
 const qInput = document.getElementById('q');
 const qClear = document.getElementById('q-clear');
+const qSpinner = document.getElementById('q-spinner');
 const searchDropdown = document.getElementById('search-dropdown');
 let searchDebounceTimer = null;
 let activeDropdownIdx = -1;
 let searchAbortController = null;
 let searchRequestSeq = 0;
+let lastExecutedSearchQuery = '';
+
+function showSearchSpinner(){
+  if(qSpinner) qSpinner.style.display = 'block';
+}
+
+function hideSearchSpinner(){
+  if(qSpinner) qSpinner.style.display = 'none';
+}
 
 function clearSearch(){
-  qInput.value = '';
-  qClear.style.display = 'none';
+  if(qInput) qInput.value = '';
+  if(qClear) qClear.style.display = 'none';
+  hideSearchSpinner();
   closeDropdown();
-  page = 1;
-  load();
-  qInput.focus();
+  if(lastExecutedSearchQuery !== ''){
+    lastExecutedSearchQuery = '';
+    page = 1;
+    load();
+  }
+  if(qInput) qInput.focus();
 }
 
 function closeDropdown(){
-  searchDropdown.classList.remove('open');
-  searchDropdown.innerHTML = '';
+  if(searchDropdown){
+    searchDropdown.classList.remove('open');
+    searchDropdown.innerHTML = '';
+  }
   activeDropdownIdx = -1;
 }
 
 async function renderSearchDropdown(query){
   if(!query || !query.trim()){
     closeDropdown();
-    qClear.style.display = 'none';
     return;
   }
-  qClear.style.display = 'block';
   const normalizedQuery = query.trim().toLowerCase();
   const requestSeq = ++searchRequestSeq;
   if(searchAbortController) searchAbortController.abort();
@@ -4779,8 +4969,9 @@ async function renderSearchDropdown(query){
       credentials: 'include',
       signal: searchAbortController.signal
     });
+    if(!res.ok) return;
     const data = await res.json();
-    if(requestSeq !== searchRequestSeq || qInput.value.trim().toLowerCase() !== normalizedQuery) return;
+    if(requestSeq !== searchRequestSeq || (qInput && qInput.value.trim().toLowerCase() !== normalizedQuery)) return;
     if(!searchDropdown) return;
     if(data.items && data.items.length > 0){
       if(!window.movieCache) window.movieCache = new Map();
@@ -4822,69 +5013,140 @@ async function renderSearchDropdown(query){
 
 function selectSearchMovie(id){
   closeDropdown();
+  hideSearchSpinner();
   openPlayer(id);
 }
 
 function viewAllSearchResults(query){
   closeDropdown();
-  qInput.value = query;
+  if(qInput) qInput.value = query;
+  lastExecutedSearchQuery = query;
   page = 1;
   load();
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
-// Live input listener: instant dropdown + grid update
-qInput.addEventListener('input', ()=>{
-  const val = qInput.value.trim();
-  clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(()=>{
-    renderSearchDropdown(val);
-  }, 180);
-});
+// Live search execution directly updating grid & dropdown
+async function executeLiveSearch(query){
+  const trimmed = (query || '').trim();
+  if(qClear){
+    qClear.style.display = trimmed ? 'inline-flex' : 'none';
+  }
 
-// Re-open dropdown on focus if input has value
-qInput.addEventListener('focus', ()=>{
-  if(qInput.value.trim()) renderSearchDropdown(qInput.value.trim());
-});
+  // If user removed/cleared the name, immediately return back to normal catalog
+  if(!trimmed){
+    hideSearchSpinner();
+    closeDropdown();
+    if(lastExecutedSearchQuery !== ''){
+      lastExecutedSearchQuery = '';
+      page = 1;
+      await load();
+    }
+    return;
+  }
 
-// Click outside closes dropdown
+  if(trimmed === lastExecutedSearchQuery){
+    return;
+  }
+
+  lastExecutedSearchQuery = trimmed;
+  showSearchSpinner();
+
+  page = 1;
+  const gridPromise = load();
+  const dropdownPromise = renderSearchDropdown(trimmed);
+
+  try {
+    await Promise.all([gridPromise, dropdownPromise]);
+  } finally {
+    hideSearchSpinner();
+  }
+}
+
+// Real-time typing listener (no need to press Enter)
+if(qInput){
+  qInput.addEventListener('input', ()=>{
+    const trimmed = qInput.value.trim();
+
+    if(qClear){
+      qClear.style.display = trimmed ? 'inline-flex' : 'none';
+    }
+
+    if(!trimmed){
+      clearTimeout(searchDebounceTimer);
+      hideSearchSpinner();
+      closeDropdown();
+      if(lastExecutedSearchQuery !== ''){
+        lastExecutedSearchQuery = '';
+        page = 1;
+        load();
+      }
+      return;
+    }
+
+    // Instant spinner display while typing so user gets immediate visual feedback
+    showSearchSpinner();
+
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(()=>{
+      executeLiveSearch(trimmed);
+    }, 280);
+  });
+
+  // Re-open dropdown on focus if input has value
+  qInput.addEventListener('focus', ()=>{
+    if(qInput.value.trim()){
+      renderSearchDropdown(qInput.value.trim());
+    }
+  });
+
+  // Keyboard navigation & Enter key
+  qInput.addEventListener('keydown', (e)=>{
+    const items = searchDropdown ? searchDropdown.querySelectorAll('.s-item') : [];
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      clearTimeout(searchDebounceTimer);
+      closeDropdown();
+      if(activeDropdownIdx >= 0 && items[activeDropdownIdx]){
+        items[activeDropdownIdx].click();
+      } else {
+        lastExecutedSearchQuery = qInput.value.trim();
+        page = 1;
+        load();
+      }
+      return;
+    }
+
+    if(!searchDropdown || !searchDropdown.classList.contains('open') || items.length === 0){
+      return;
+    }
+
+    if(e.key === 'ArrowDown'){
+      e.preventDefault();
+      activeDropdownIdx = (activeDropdownIdx + 1) % items.length;
+      highlightItem(items);
+    } else if(e.key === 'ArrowUp'){
+      e.preventDefault();
+      activeDropdownIdx = (activeDropdownIdx - 1 + items.length) % items.length;
+      highlightItem(items);
+    } else if(e.key === 'Escape'){
+      closeDropdown();
+    }
+  });
+}
+
+// Click outside or scroll closes dropdown
 document.addEventListener('click', (e)=>{
   if(!e.target.closest('.search-wrap')){
     closeDropdown();
   }
 });
 
-// Keyboard navigation in search bar (ArrowDown, ArrowUp, Enter, Escape)
-qInput.addEventListener('keydown', (e)=>{
-  const items = searchDropdown.querySelectorAll('.s-item');
-  if(!searchDropdown.classList.contains('open') || items.length === 0){
-    if(e.key === 'Enter'){
-      closeDropdown();
-      page = 1;
-      load();
-    }
-    return;
-  }
-
-  if(e.key === 'ArrowDown'){
-    e.preventDefault();
-    activeDropdownIdx = (activeDropdownIdx + 1) % items.length;
-    highlightItem(items);
-  } else if(e.key === 'ArrowUp'){
-    e.preventDefault();
-    activeDropdownIdx = (activeDropdownIdx - 1 + items.length) % items.length;
-    highlightItem(items);
-  } else if(e.key === 'Enter'){
-    e.preventDefault();
-    if(activeDropdownIdx >= 0 && items[activeDropdownIdx]){
-      items[activeDropdownIdx].click();
-    } else {
-      viewAllSearchResults(qInput.value.trim());
-    }
-  } else if(e.key === 'Escape'){
+window.addEventListener('scroll', ()=>{
+  if(searchDropdown && searchDropdown.classList.contains('open')){
     closeDropdown();
   }
-});
+}, { passive: true });
 
 function highlightItem(items){
   items.forEach((it, i)=>{
@@ -4897,11 +5159,13 @@ function highlightItem(items){
   });
 }
 
-// Change event listeners on selects
-document.getElementById('sort').addEventListener('change', ()=>{ page=1; load(); });
-document.getElementById('kind').addEventListener('change', ()=>{
+// Change event listeners on selects (if elements are selects)
+const sortEl = document.getElementById('sort');
+if(sortEl && sortEl.tagName === 'SELECT') sortEl.addEventListener('change', ()=>{ page=1; load(); });
+const kindEl = document.getElementById('kind');
+if(kindEl && kindEl.tagName === 'SELECT') kindEl.addEventListener('change', ()=>{
   page=1;
-  syncFilterPills(document.getElementById('kind').value, activeGenre);
+  syncFilterPills(kindEl.value, activeGenre, activeSource);
   load();
 });
 

@@ -207,7 +207,13 @@ ADULT_EXCLUSION_SQL = (
     "AND title NOT LIKE '%Kaddu%' "
     "AND title NOT LIKE '%DesiPrime%' "
     "AND title NOT LIKE '%Atrangii%' "
-    "AND title NOT LIKE '%Jugnutv%'"
+    "AND title NOT LIKE '%Jugnutv%' "
+    "AND title NOT LIKE '%Honeymoon Couples%' "
+    "AND title NOT LIKE '%Tempt Original%' "
+    "AND title NOT LIKE '%(Tempt%' "
+    "AND (synopsis NOT LIKE '%WOOW Original%' OR synopsis IS NULL) "
+    "AND (synopsis NOT LIKE '%WOOW%' OR synopsis IS NULL) "
+    "AND (synopsis NOT LIKE '%Tempt Original%' OR synopsis IS NULL)"
 )
 
 COMMON_SYNONYMS = {
