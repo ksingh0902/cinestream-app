@@ -28,6 +28,7 @@ from scraper.http import HttpClient
 from app.adapters.ask4movie import catalog as a4m_catalog
 from app.adapters.ask4movie.http import get as a4m_get
 from app.adapters.ask4movie.sync import upsert as a4m_upsert
+from app.adapters.movies7.sync import sync_movies7
 
 logger = logging.getLogger("cinemymovies.sync")
 
@@ -468,6 +469,7 @@ def run_full_sync() -> Dict[str, Any]:
 
     ym_res = sync_yomovies(base_time)
     a4m_res = sync_ask4movie(base_time)
+    m7_res = sync_movies7(pages_per_category=5)
 
     duration = round(time.time() - start_time, 2)
     summary = {
@@ -476,7 +478,8 @@ def run_full_sync() -> Dict[str, Any]:
         "timestamp": base_time,
         "yomovies": ym_res,
         "ask4movie": a4m_res,
-        "total_added": ym_res["added"] + a4m_res["added"],
+        "movies7": m7_res,
+        "total_added": ym_res["added"] + a4m_res["added"] + m7_res.get("total", 0),
         "total_refreshed": ym_res["updated"] + a4m_res["updated"],
     }
 
@@ -487,6 +490,14 @@ def run_full_sync() -> Dict[str, Any]:
     print("=" * 60)
     print(f"[SYNC] Finished in {duration}s! Total New: {summary['total_added']}, Total Refreshed: {summary['total_refreshed']}")
     print("=" * 60)
+
+    try:
+        from app.api.routes_catalog import invalidate_catalog_cache, prewarm_catalog_cache
+        invalidate_catalog_cache()
+        prewarm_catalog_cache()
+    except Exception as exc:
+        print(f"[SYNC] Note: catalog cache invalidation skipped: {exc}", flush=True)
+
     return summary
 
 

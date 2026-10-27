@@ -62,6 +62,11 @@ async def _periodic_sync_loop():
 @app.on_event("startup")
 async def startup_sync_scheduler():
     init_auth_db()
+    try:
+        from app.api.routes_catalog import prewarm_catalog_cache
+        prewarm_catalog_cache()
+    except Exception as e:
+        print(f"[startup] Failed to prewarm catalog cache: {e}", flush=True)
     global _sync_task
     if os.getenv("DISABLE_AUTO_SYNC", "0") != "1":
         _sync_task = asyncio.create_task(_periodic_sync_loop())

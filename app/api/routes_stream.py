@@ -433,7 +433,7 @@ def stream(
             info.url,
             is_series=doo_is_series if source == "dooflix" else bool(row["is_series"]),
             existing_servers=info.servers,
-            tmdb_id=str(tmdb_id or "") if source == "dooflix" else None,
+            tmdb_id=str(tmdb_id or row["tmdb_id"] or "") if (source in ("dooflix", "movies7") or row["tmdb_id"]) else None,
         )
         if source == "dooflix":
             info.url, info.servers = _prioritize_dooflix_servers(info.servers)

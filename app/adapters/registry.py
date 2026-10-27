@@ -3,9 +3,10 @@ from __future__ import annotations
 from .base import SourceAdapter
 from .ask4movie import adapter as ask4movie
 from .dooflix import adapter as dooflix
+from .movies7 import adapter as movies7
 from .yomovies import adapter as yomovies          # EXISTING — wrap only
 
-ADAPTERS: dict[str, SourceAdapter] = {a.key: a for a in (yomovies, ask4movie, dooflix)}
+ADAPTERS: dict[str, SourceAdapter] = {a.key: a for a in (yomovies, ask4movie, dooflix, movies7)}
 
 
 def get(key: str) -> SourceAdapter | None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -11,14 +12,25 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from ..adapters import registry
-from ..adapters.ask4movie.sync import connect
 
 router = APIRouter()
 
-_MOVIES_CACHE_TTL_SECONDS = 30
-_MOVIES_CACHE_MAX_ENTRIES = 64
-_movies_cache: dict[tuple, tuple[float, dict]] = {}
-_movies_cache_lock = threading.Lock()
+_FILTER_CACHE_TTL_SECONDS = 600.0  # 10 minutes cache per filter
+_FILTER_CACHE_MAX_ENTRIES = 512
+_filter_cache: dict[tuple, tuple[float, list[dict]]] = {}
+_filter_cache_lock = threading.Lock()
+
+
+def get_db_connection() -> sqlite3.Connection:
+    """Ultra-fast, read-optimized SQLite connection without migration overhead."""
+    target_path = "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db"
+    conn = sqlite3.connect(target_path, timeout=10, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA query_only=ON")
+    conn.execute("PRAGMA cache_size = -64000")
+    conn.execute("PRAGMA mmap_size = 268435456")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _normalized_title(title: str | None) -> str:
@@ -27,6 +39,87 @@ def _normalized_title(title: str | None) -> str:
     value = re.sub(r"\s+(?:19|20)\d{2}\s*$", " ", value)
     value = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual[ -]?audio|english dubbed|english|hindi)\b", " ", value)
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+_non_m7_title_keys: set[tuple[str, str]] | None = None
+_non_m7_title_keys_lock = threading.Lock()
+
+
+def _get_non_m7_title_keys() -> set[tuple[str, str]]:
+    global _non_m7_title_keys
+    with _non_m7_title_keys_lock:
+        if _non_m7_title_keys is not None:
+            return _non_m7_title_keys
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT title, year FROM movies WHERE source IN ('yomovies', 'dooflix', 'ask4movie') AND title IS NOT NULL"
+            ).fetchall()
+            keys = set()
+            for r in rows:
+                nt = _normalized_title(r["title"])
+                yr = str(r["year"] or "").strip()
+                if nt:
+                    keys.add((nt, yr))
+                    keys.add((nt, ""))
+            _non_m7_title_keys = keys
+            return _non_m7_title_keys
+
+
+def is_movie_available_on_primary_sources(title: str | None, year: str | int | None) -> bool:
+    """Returns True if this movie is already available on Yomovies, Dooflix, or Ask4movie."""
+    if not title:
+        return False
+    keys = _get_non_m7_title_keys()
+    nt = _normalized_title(title)
+    if not nt:
+        return False
+    yr = str(year or "").strip()
+    if (nt, yr) in keys or (nt, "") in keys:
+        return True
+    if yr.isdigit():
+        y_int = int(yr)
+        if (nt, str(y_int - 1)) in keys or (nt, str(y_int + 1)) in keys:
+            return True
+    return False
+
+
+def invalidate_catalog_cache() -> None:
+    """Clear in-memory catalog cache when new titles are synced or updated."""
+    global _non_m7_title_keys
+    with _filter_cache_lock:
+        _filter_cache.clear()
+    with _non_m7_title_keys_lock:
+        _non_m7_title_keys = None
+
+
+def prewarm_catalog_cache() -> None:
+    """Precompute common filter views in a background thread so first loads are instant."""
+    common_filters = [
+        {},                                          # All titles
+        {"genre": "bollywood"},                     # Bollywood
+        {"genre": "punjabi"},                       # Punjabi
+        {"genre": "hollywood"},                     # Hollywood
+        {"genre": "hindi dubbed"},                  # Hindi Dubbed
+        {"genre": "animation"},                     # Animation
+        {"series": 1},                              # Web Series
+        {"series": 0},                              # Movies
+        {"genre": "action"},                        # Action
+        {"genre": "comedy"},                        # Comedy
+        {"source": "movies7"},                      # 7
+        {"source": "ask4movie"},                    # ask
+        {"source": "dooflix"},                      # doo
+        {"source": "yomovies"},                     # ym
+    ]
+
+    def _worker():
+        for f in common_filters:
+            try:
+                movies(**f, page=1, per_page=48)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_worker, name="catalog-prewarm", daemon=True)
+    t.start()
 
 
 def _audio_edition(item: dict) -> str:
@@ -44,8 +137,8 @@ def _audio_edition(item: dict) -> str:
     return "unknown"
 
 
-def _source_priority(source: str | None, edition: str) -> int:
-    order = (("yomovies", "dooflix", "ask4movie") if edition in ("hindi", "hindi_dubbed", "dual_audio") else ("yomovies", "ask4movie", "dooflix"))
+def _source_priority(source: str | None, edition: str = "") -> int:
+    order = ("yomovies", "dooflix", "ask4movie", "movies7")
     try:
         return order.index(source or "")
     except ValueError:
@@ -265,12 +358,29 @@ def movies(
     page: int = 1,
     per_page: int = 48,
 ):
-    cache_key = (source or "", (q or "").strip().lower(), (genre or "").strip().lower(), year or "", series, sort, page, per_page)
+    filter_key = (
+        source or "",
+        (q or "").strip().lower(),
+        (genre or "").strip().lower(),
+        year or "",
+        series,
+        sort,
+    )
     now = time.monotonic()
-    with _movies_cache_lock:
-        cached = _movies_cache.get(cache_key)
-        if cached and now - cached[0] < _MOVIES_CACHE_TTL_SECONDS:
-            return cached[1]
+
+    # Instant memory cache check (0.01ms)
+    with _filter_cache_lock:
+        cached = _filter_cache.get(filter_key)
+        if cached and (now - cached[0] < _FILTER_CACHE_TTL_SECONDS):
+            items_list = cached[1]
+            total = len(items_list)
+            offset = (page - 1) * per_page
+            return {
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "items": items_list[offset:offset + per_page],
+            }
 
     where = ["title IS NOT NULL AND title != ''"]
     args = []
@@ -306,34 +416,24 @@ def movies(
         args.append(year)
 
     where_clause = " AND ".join(where)
-    count_sql = f"SELECT COUNT(*) FROM movies WHERE {where_clause}"
 
     # Ordering:
     if q_str:
         order = "CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, CAST(year AS INT) DESC, id ASC"
-        query_sql = (
-            f"SELECT * FROM movies WHERE {where_clause} "
-            f"ORDER BY {order} LIMIT ? OFFSET ?"
-        )
-        query_args = args + [f"{q_str}%", f"%{q_str}%", per_page, (page - 1) * per_page]
+        query_sql = f"SELECT * FROM movies WHERE {where_clause} ORDER BY {order}"
+        query_args = args + [f"{q_str}%", f"%{q_str}%"]
     elif sort in ("imdb", "rating"):
         query_sql = (
             f"SELECT * FROM movies WHERE {where_clause} "
-            f"ORDER BY COALESCE(rating, CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL), 0) DESC, CAST(year AS INT) DESC, id ASC "
-            f"LIMIT ? OFFSET ?"
+            f"ORDER BY COALESCE(rating, CAST(REPLACE(REPLACE(imdb, 'IMDb: ', ''), '★ ', '') AS REAL), 0) DESC, CAST(year AS INT) DESC, id ASC"
         )
-        query_args = args + [per_page, (page - 1) * per_page]
+        query_args = args
     elif sort == "title":
-        query_sql = (
-            f"SELECT * FROM movies WHERE {where_clause} "
-            f"ORDER BY title ASC, CAST(year AS INT) DESC, id ASC "
-            f"LIMIT ? OFFSET ?"
-        )
-        query_args = args + [per_page, (page - 1) * per_page]
+        query_sql = f"SELECT * FROM movies WHERE {where_clause} ORDER BY title ASC, CAST(year AS INT) DESC, id ASC"
+        query_args = args
     else:
         # Default ("recent" / "year"):
-        # Interleave sources (ask4movie and yomovies) with the latest released movies on top (e.g. Udta Teer, Gajab Raat),
-        # ordered by year descending and id ascending.
+        # Interleave sources with the latest released movies on top, ordered by year descending and id ascending.
         query_sql = f"""
             WITH filtered AS (
                 SELECT * FROM movies WHERE {where_clause}
@@ -349,39 +449,49 @@ def movies(
                 FROM filtered
             )
             SELECT * FROM ranked 
-            ORDER BY src_rank ASC, source ASC 
-            LIMIT ? OFFSET ?
+            ORDER BY src_rank ASC, source ASC
         """
-        query_args = args + [per_page, (page - 1) * per_page]
+        query_args = args
 
-    with connect() as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection() as conn:
+        raw_rows = conn.execute(query_sql, query_args).fetchall()
         if source:
-            total = conn.execute(count_sql, args).fetchone()[0]
-            raw_rows = conn.execute(query_sql, query_args).fetchall()
-            rows = [_format_row(dict(r)) for r in raw_rows]
+            if source == "movies7":
+                formatted = [
+                    _format_row(dict(r)) for r in raw_rows
+                    if not is_movie_available_on_primary_sources(dict(r).get("title"), dict(r).get("year"))
+                ]
+            else:
+                formatted = [_format_row(dict(r)) for r in raw_rows]
+            items_list = formatted
         else:
-            ordered_sql = query_sql.rsplit("LIMIT ? OFFSET ?", 1)[0]
-            ordered_args = query_args[:-2]
-            raw_rows = conn.execute(ordered_sql, ordered_args).fetchall()
-            grouped = _group_ordered_editions([_format_row(dict(r)) for r in raw_rows])
-            total = len(grouped)
-            offset = (page - 1) * per_page
-            rows = grouped[offset:offset + per_page]
+            formatted = []
+            for r in raw_rows:
+                d = dict(r)
+                if d.get("source") == "movies7" and is_movie_available_on_primary_sources(d.get("title"), d.get("year")):
+                    continue
+                formatted.append(_format_row(d))
+            items_list = _group_ordered_editions(formatted)
 
-    result = {"total": total, "page": page, "per_page": per_page, "items": rows}
-    with _movies_cache_lock:
-        if len(_movies_cache) >= _MOVIES_CACHE_MAX_ENTRIES:
-            oldest_key = min(_movies_cache, key=lambda key: _movies_cache[key][0])
-            _movies_cache.pop(oldest_key, None)
-        _movies_cache[cache_key] = (now, result)
-    return result
+    with _filter_cache_lock:
+        if len(_filter_cache) >= _FILTER_CACHE_MAX_ENTRIES:
+            oldest_key = min(_filter_cache, key=lambda k: _filter_cache[k][0])
+            _filter_cache.pop(oldest_key, None)
+        _filter_cache[filter_key] = (now, items_list)
+
+    total = len(items_list)
+    offset = (page - 1) * per_page
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "items": items_list[offset:offset + per_page],
+    }
 
 
 @router.get("/api/movie/{movie_id}")
 def movie(movie_id: int):
-    with connect() as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection() as conn:
         row = conn.execute("SELECT * FROM movies WHERE id = ?", (movie_id,)).fetchone()
     if not row:
         raise HTTPException(404, "not found")
@@ -392,8 +502,7 @@ def movie(movie_id: int):
     current_edition = _audio_edition(d)
     d["audio_edition"] = current_edition
     if title_key:
-        with connect() as conn:
-            conn.row_factory = sqlite3.Row
+        with get_db_connection() as conn:
             candidates = conn.execute(
                 f"SELECT * FROM movies WHERE COALESCE(CAST(year AS TEXT), '') = ? AND id != ? AND ({ADULT_EXCLUSION_SQL})",
                 (str(d.get("year") or ""), movie_id),
@@ -457,8 +566,7 @@ def _lookup_tmdb_tv_id(title: str, year: str | None = None) -> str | None:
 
 @router.get("/api/series/{movie_id}/seasons")
 def series_seasons(movie_id: int):
-    with connect() as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection() as conn:
         row = conn.execute("SELECT * FROM movies WHERE id = ?", (movie_id,)).fetchone()
 
     if not row:
@@ -482,8 +590,7 @@ def series_seasons(movie_id: int):
 
     # Find sibling rows in database (excluding adult/erotic)
     db_episodes = {}
-    with connect() as conn:
-        conn.row_factory = sqlite3.Row
+    with get_db_connection() as conn:
         query = f"SELECT id, title, source, tmdb_id FROM movies WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL}) ORDER BY id ASC"
         siblings = conn.execute(query, (f"{clean_name}%",)).fetchall()
         for sib in siblings:
@@ -499,9 +606,10 @@ def series_seasons(movie_id: int):
         tmdb_id = _lookup_tmdb_tv_id(clean_name, str(row["year"] or ""))
         if tmdb_id:
             try:
-                with connect() as conn:
-                    conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
-                    conn.commit()
+                target_path = "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db"
+                with sqlite3.connect(target_path, timeout=10) as write_conn:
+                    write_conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
+                    write_conn.commit()
             except Exception:
                 pass
 
