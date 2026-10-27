@@ -307,6 +307,20 @@ select:focus {
   color: #fff !important;
   box-shadow: 0 3px 12px rgba(225, 29, 72, 0.45) !important;
 }
+.pill-animation {
+  border-color: #f59e0b !important;
+  color: #fbbf24 !important;
+  font-weight: 700;
+}
+.pill-animation:hover {
+  background: rgba(245, 158, 11, 0.16) !important;
+}
+.pill-animation.active {
+  background: #d97706 !important;
+  border-color: #f59e0b !important;
+  color: #fff !important;
+  box-shadow: 0 3px 12px rgba(245, 158, 11, 0.45) !important;
+}
 .pill-series {
   border-color: #8b5cf6 !important;
   color: #c084fc !important;
@@ -1662,6 +1676,7 @@ video:-moz-full-screen,
 .fs-btn-icon:hover {
   background: rgba(255, 255, 255, 0.26);
 }
+.fs-control-icon { width:22px; height:22px; display:block; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 
 /* Fullscreen Floating Quick Next Button */
 .fs-floating-next-btn {
@@ -2201,6 +2216,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
   <button class="pill pill-punjabi" data-kind="" data-genre="Punjabi" data-source="" onclick="setQuickFilter('', 'Punjabi', '')">🌾 Punjabi</button>
   <button class="pill pill-hollywood" data-kind="" data-genre="Hollywood" data-source="" onclick="setQuickFilter('', 'Hollywood', '')">🌎 Hollywood</button>
   <button class="pill pill-bollywood" data-kind="" data-genre="Bollywood" data-source="" onclick="setQuickFilter('', 'Bollywood', '')">🍿 Bollywood</button>
+  <button class="pill pill-animation" data-kind="" data-genre="Animation" data-source="" onclick="setQuickFilter('', 'Animation', '')">🎨 Animation</button>
   <button class="pill pill-series" data-kind="1" data-genre="" data-source="" onclick="setQuickFilter('1', '', '')">📺 Web Series</button>
   <button class="pill pill-movies" data-kind="0" data-genre="" data-source="" onclick="setQuickFilter('0', '', '')">🎬 Movies</button>
   <button class="pill pill-ask" data-kind="" data-genre="" data-source="ask4movie" onclick="setQuickFilter('', '', 'ask4movie')">🍿 ask</button>
@@ -2272,7 +2288,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
         </div>
         <div class="fs-top-right">
           <button id="fs-btn-next-ep" class="fs-btn-next" style="display:none;" onclick="playNextEpisode()" title="Play Next Episode (Press N)">⏭️ Next Episode</button>
-          <button class="fs-btn-icon" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (F)">🗗</button>
+          <button class="fs-btn-icon" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (F)" aria-label="Exit fullscreen"><svg class="fs-control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg></button>
         </div>
       </div>
       <!-- Fullscreen Floating Quick Next Button -->
@@ -2281,7 +2297,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
         <span id="fs-floating-next-text">Next Episode</span>
       </button>
       <video id="v" controls playsinline controlslist="nofullscreen noremoteplayback" crossorigin="anonymous"></video>
-      <button id="player-fullscreen-toggle" class="player-fullscreen-toggle" onclick="togglePlayerFullscreen()" title="Fullscreen (Press F)" aria-label="Fullscreen"><span aria-hidden="true">⛶</span><span class="player-fs-label">Fullscreen</span></button>
+      <button id="player-fullscreen-toggle" class="player-fullscreen-toggle" onclick="togglePlayerFullscreen()" title="Fullscreen (Press F)" aria-label="Fullscreen"><svg class="fs-control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><span class="player-fs-label">Fullscreen</span></button>
       <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true" referrerpolicy="no-referrer"></iframe>
       <div id="player-hud"></div>
       <div id="resume-banner" class="resume-banner" style="display:none;">
@@ -4154,6 +4170,14 @@ setInterval(()=>{ if(curId && overlay.classList.contains('on')) selfHeal(); }, 2
 window.addEventListener('keydown', (e)=>{
   // Check Back / Exit key first across all TV remotes (Android, Samsung Tizen, LG webOS, Fire TV)
   if(isBackOrExitKey(e)){
+    const fsElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+    if(fsElement){
+      e.preventDefault();
+      e.stopPropagation();
+      const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+      if(exitFullscreen) Promise.resolve(exitFullscreen.call(document)).catch(()=>{});
+      return;
+    }
     if(overlay && overlay.classList.contains('on')){
       e.preventDefault();
       e.stopPropagation();

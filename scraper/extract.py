@@ -111,7 +111,23 @@ def parse_listing(html: str, base: str) -> List[Dict]:
 def parse_pagination(html: str, base: str) -> str | None:
     soup = BeautifulSoup(html, "lxml")
     nxt = soup.select_one("a.next, .next.page-numbers, a[rel='next']")
-    return urljoin(base, nxt["href"]) if nxt and nxt.get("href") else None
+    if nxt and nxt.get("href"):
+        return urljoin(base, nxt["href"])
+
+    # YoMovies uses numeric links (`a.page.larger`) without a semantic Next link.
+    current = 1
+    current_node = soup.select_one(".wp-pagenavi .current, .pagination .current, span.current")
+    if current_node:
+        match = re.search(r"\d+", current_node.get_text(" ", strip=True))
+        if match:
+            current = int(match.group())
+    numeric_links = []
+    for anchor in soup.select("a.page.larger, .wp-pagenavi a.page, .pagination a"):
+        text = anchor.get_text(" ", strip=True)
+        href = anchor.get("href")
+        if href and text.isdigit() and int(text) > current:
+            numeric_links.append((int(text), urljoin(base, href)))
+    return min(numeric_links, default=(0, None))[1]
 
 
 def parse_detail(html: str, url: str) -> Dict:

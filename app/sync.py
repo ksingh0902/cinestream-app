@@ -23,7 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from config import SITE_MIRRORS
-from scraper.extract import parse_detail, parse_listing, is_erotic_content
+from scraper.extract import parse_detail, parse_listing, parse_pagination, is_erotic_content
 from scraper.http import HttpClient
 from app.adapters.ask4movie import catalog as a4m_catalog
 from app.adapters.ask4movie.http import get as a4m_get
@@ -47,9 +47,14 @@ YOMOVIES_PAGES = [
     ("/genre/tv-shows/", 2),       # TV Shows
     ("/release-year/2026/", 2),    # Current year releases
     ("/genre/bollywood/", 1),      # Latest Bollywood
+    ("/genre/animation/", 100),    # Complete Animation catalogue (stops at last page)
     ("/genre/punjabi/", 1),        # Latest Punjabi
     ("/movies/", 1),               # General movies
 ]
+
+YOMOVIES_FORCED_GENRES = {
+    "/genre/animation/": "Animation",
+}
 
 ASK4MOVIE_URLS = [
     "https://fbox.gd/movie?page=1",
@@ -188,17 +193,24 @@ def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at
     return is_new
 
 
-def sync_yomovies(base_time: int) -> Dict[str, int]:
+def sync_yomovies(
+    base_time: int,
+    pages: list[tuple[str, int]] | None = None,
+    base_url: str | None = None,
+    enrich_details: bool = True,
+) -> Dict[str, int]:
     """Sync latest items from Yomovies."""
-    base_url = SITE_MIRRORS[0] if SITE_MIRRORS else "https://yomovies.wine"
+    base_url = (base_url or (SITE_MIRRORS[0] if SITE_MIRRORS else "https://yomovies.wine")).rstrip("/")
     http = HttpClient(delay=0.1, cache_dir=".cache")
 
     print(f"[sync-yomovies] Scraping latest items from {base_url}...", flush=True)
 
     urls_ordered: List[str] = []
     seen: set = set()
+    forced_genres_by_url: Dict[str, set[str]] = {}
+    listing_by_url: Dict[str, Dict[str, Any]] = {}
 
-    for path, max_p in YOMOVIES_PAGES:
+    for path, max_p in (pages or YOMOVIES_PAGES):
         for p in range(1, max_p + 1):
             if path == "/":
                 url = base_url if p == 1 else f"{base_url}/page/{p}/"
@@ -207,16 +219,30 @@ def sync_yomovies(base_time: int) -> Dict[str, int]:
             try:
                 html = http.get(url, force=True)
                 cards = parse_listing(html, base_url)
+                if not cards:
+                    break
                 new_in_page = 0
                 for c in cards:
                     u = c.get("url")
+                    forced_genre = YOMOVIES_FORCED_GENRES.get(path)
+                    if u and forced_genre:
+                        forced_genres_by_url.setdefault(u, set()).add(forced_genre)
+                        genres = c.get("genres") or []
+                        if not any(str(g).lower() == forced_genre.lower() for g in genres):
+                            genres.append(forced_genre)
+                        c["genres"] = genres
+                    if u:
+                        listing_by_url[u] = c
                     if u and u not in seen:
                         seen.add(u)
                         urls_ordered.append(u)
                         new_in_page += 1
                 print(f"[sync-yomovies] [{path} p.{p}] Found {len(cards)} items ({new_in_page} new)", flush=True)
+                if p < max_p and not parse_pagination(html, base_url):
+                    break
             except Exception as e:
                 print(f"[sync-yomovies] Error fetching {url}: {e}", flush=True)
+                break
 
     print(f"[sync-yomovies] Total unique URLs to ingest/refresh: {len(urls_ordered)}", flush=True)
 
@@ -225,6 +251,25 @@ def sync_yomovies(base_time: int) -> Dict[str, int]:
 
     added = 0
     updated = 0
+
+    if not enrich_details:
+        for idx, u in enumerate(urls_ordered):
+            info = listing_by_url.get(u)
+            if not info or not info.get("title"):
+                continue
+            is_new_overall = False
+            for conn in conns:
+                if upsert_yomovies_item(conn, info, base_time - idx):
+                    is_new_overall = True
+            if is_new_overall:
+                added += 1
+            else:
+                updated += 1
+        for conn in conns:
+            conn.close()
+        http.close()
+        print(f"[sync-yomovies] Catalogue import finished: {added} added, {updated} refreshed.", flush=True)
+        return {"added": added, "updated": updated, "total": len(urls_ordered)}
 
     for idx, u in enumerate(urls_ordered):
         try:
@@ -258,6 +303,20 @@ def sync_yomovies(base_time: int) -> Dict[str, int]:
 
             if not info or not info.get("title"):
                 continue
+
+            forced_genres = forced_genres_by_url.get(u, set())
+            if forced_genres:
+                info_genres = info.get("genres") or []
+                if isinstance(info_genres, str):
+                    try:
+                        info_genres = json.loads(info_genres)
+                    except Exception:
+                        info_genres = [g.strip() for g in info_genres.split(",") if g.strip()]
+                existing_genres = {str(g).lower() for g in info_genres}
+                for forced_genre in forced_genres:
+                    if forced_genre.lower() not in existing_genres:
+                        info_genres.append(forced_genre)
+                info["genres"] = info_genres
 
             # Preserves top-to-bottom sequence on Yomovies homepage:
             # Earlier items on page 1 get higher updated_at timestamps
