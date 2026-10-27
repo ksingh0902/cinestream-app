@@ -68,7 +68,10 @@ async def startup_sync_scheduler():
     except Exception as e:
         print(f"[startup] Failed to prewarm catalog cache: {e}", flush=True)
     global _sync_task
-    if os.getenv("DISABLE_AUTO_SYNC", "0") != "1":
+    # Production web workers must not crawl large catalogues while serving users.
+    # Keep the opt-out explicit for development/import environments.
+    auto_sync_default = "1" if os.getenv("ENVIRONMENT", "").lower() == "production" else "0"
+    if os.getenv("DISABLE_AUTO_SYNC", auto_sync_default) != "1":
         _sync_task = asyncio.create_task(_periodic_sync_loop())
 
 @app.on_event("shutdown")

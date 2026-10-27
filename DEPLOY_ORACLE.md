@@ -52,3 +52,20 @@ users. Do not replace the VM `.env` or catalogue database during a normal code d
 - Never print secret values in logs or chat.
 - Do not expose the container directly; keep it bound to `127.0.0.1:8000`.
 - Keep Nginx and the HTTPS certificate managed separately from application rebuilds.
+
+## Catalogue imports (separate from production)
+
+Do not run `run_full_sync` or a crawler inside the production web container. Run the
+importer on a development/worker machine, validate the resulting `yomovies.db`, and
+copy it to the VM only after taking a timestamped backup:
+
+```bash
+ssh -i /path/to/key ubuntu@137.23.48.95
+cd ~/cinestream-app
+cp yomovies.db backups/yomovies-$(date +%Y%m%d-%H%M%S).db
+```
+
+Copy the validated database to a temporary path, then atomically replace the live file
+while the container is stopped. Restart only the application container using the
+normal redeploy commands above. `DISABLE_AUTO_SYNC=1` is set for production so the
+web process cannot start a background crawl.
