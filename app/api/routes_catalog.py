@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
+import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +14,11 @@ from ..adapters import registry
 from ..adapters.ask4movie.sync import connect
 
 router = APIRouter()
+
+_MOVIES_CACHE_TTL_SECONDS = 30
+_MOVIES_CACHE_MAX_ENTRIES = 64
+_movies_cache: dict[tuple, tuple[float, dict]] = {}
+_movies_cache_lock = threading.Lock()
 
 
 def _normalized_title(title: str | None) -> str:
@@ -252,6 +259,13 @@ def movies(
     page: int = 1,
     per_page: int = 48,
 ):
+    cache_key = (source or "", (q or "").strip().lower(), (genre or "").strip().lower(), year or "", series, sort, page, per_page)
+    now = time.monotonic()
+    with _movies_cache_lock:
+        cached = _movies_cache.get(cache_key)
+        if cached and now - cached[0] < _MOVIES_CACHE_TTL_SECONDS:
+            return cached[1]
+
     where = ["title IS NOT NULL AND title != ''"]
     args = []
 
@@ -349,7 +363,13 @@ def movies(
             offset = (page - 1) * per_page
             rows = grouped[offset:offset + per_page]
 
-    return {"total": total, "page": page, "per_page": per_page, "items": rows}
+    result = {"total": total, "page": page, "per_page": per_page, "items": rows}
+    with _movies_cache_lock:
+        if len(_movies_cache) >= _MOVIES_CACHE_MAX_ENTRIES:
+            oldest_key = min(_movies_cache, key=lambda key: _movies_cache[key][0])
+            _movies_cache.pop(oldest_key, None)
+        _movies_cache[cache_key] = (now, result)
+    return result
 
 
 @router.get("/api/movie/{movie_id}")

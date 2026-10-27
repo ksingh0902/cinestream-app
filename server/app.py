@@ -251,8 +251,6 @@ def search_titles(q: str = "", limit: int = 10):
     c = db()
     sq_clause, sq_params = _build_search_clause(q_str)
     sql_base = f"FROM movies WHERE {sq_clause} AND ({ADULT_EXCLUSION_SQL})"
-    total = c.execute(f"SELECT COUNT(*) {sql_base}", sq_params).fetchone()[0]
-    
     order_clause = (
         f"CASE "
         f"WHEN title LIKE ? THEN 0 "
@@ -260,13 +258,16 @@ def search_titles(q: str = "", limit: int = 10):
         f"ELSE 2 END, "
         f"CAST(year AS INT) DESC, id DESC"
     )
-    rank_params = sq_params + [f"{q_str}%", f"%{q_str}%", min(limit, 50)]
+    requested_limit = min(limit, 50)
+    rank_params = sq_params + [f"{q_str}%", f"%{q_str}%", requested_limit + 1]
     rows = c.execute(
-        f"SELECT id, title, year, poster, quality, imdb, is_series {sql_base} "
+        f"SELECT id, title, year, poster, quality, imdb, is_series, source {sql_base} "
         f"ORDER BY {order_clause} LIMIT ?",
         rank_params
     ).fetchall()
-    return {"total": total, "items": [dict(r) for r in rows]}
+    has_more = len(rows) > requested_limit
+    items = [dict(r) for r in rows[:requested_limit]]
+    return {"total": len(items), "has_more": has_more, "items": items}
 
 
 @app.get("/api/genres")
