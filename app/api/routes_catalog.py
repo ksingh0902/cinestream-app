@@ -23,7 +23,7 @@ _filter_cache_lock = threading.Lock()
 
 def get_db_connection() -> sqlite3.Connection:
     """Ultra-fast, read-optimized SQLite connection with 30s busy timeout and WAL mode."""
-    target_path = "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db"
+    target_path = os.getenv("DB_PATH") or ("yomovies.db" if os.path.exists("yomovies.db") else "cinemymovies.sqlite3")
     conn = sqlite3.connect(target_path, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout = 30000")

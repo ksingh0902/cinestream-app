@@ -13,7 +13,7 @@ class Config:
     stream_mirrors: list[str] = field(
         default_factory=lambda: _list("FBOX_MIRRORS", "https://flixfever.cyou,https://fbox.gd"))
 
-    db_path: str = os.getenv("DB_PATH", "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db")
+    db_path: str = os.getenv("DB_PATH", "yomovies.db" if os.path.exists("yomovies.db") else "cinemymovies.sqlite3")
     delay: float = float(os.getenv("CRAWL_DELAY", "0.6"))
     workers: int = int(os.getenv("CRAWL_WORKERS", "4"))
     timeout: int = int(os.getenv("HTTP_TIMEOUT", "25"))
