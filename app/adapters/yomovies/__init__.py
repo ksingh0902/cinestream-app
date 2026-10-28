@@ -132,8 +132,13 @@ class YomoviesAdapter(SourceAdapter):
                         ttl_s=STREAM_TTL,
                     )
 
-        # 4. Try iframe embeds
+        # 4. Try non-speedostream iframe embeds (e.g. netu.ac, etc.)
         for e in embeds:
+            host = (e.get("host") or "").lower()
+            url = (e.get("url") or "").lower()
+            if "speedo" in host or "speedostream" in url or "/embed-" in url:
+                # NEVER return raw speedostream iframe: speedostream blocks iframe embedding with "Embeds disabled3"
+                continue
             if e.get("url"):
                 return StreamInfo(
                     kind="iframe",
@@ -142,37 +147,42 @@ class YomoviesAdapter(SourceAdapter):
                     ttl_s=STREAM_TTL,
                 )
 
-        # 5. Cinemeta fallback for Hollywood/international titles
+        # 5. TMDB & Cinemeta fallback for movies that have upstream matches
         try:
             import re
             import httpx
             with sqlite3.connect(DB_PATH, timeout=5) as conn:
                 conn.row_factory = sqlite3.Row
-                r = conn.execute("SELECT title, year, genres FROM movies WHERE detail_url=? OR url=?", (detail_url, detail_url)).fetchone()
+                r = conn.execute("SELECT id, title, year, genres, tmdb_id, is_series FROM movies WHERE detail_url=? OR url=?", (detail_url, detail_url)).fetchone()
             if r:
-                genres = (r["genres"] or "").lower()
-                title_lower = (r["title"] or "").lower()
-                is_regional = any(k in genres for k in ["punjabi", "bollywood", "marathi", "bengali", "tamil", "telugu"]) or \
-                              any(k in title_lower for k in ["punjabi", "hindi", "bengali", "marathi", "tamil", "telugu", "season"])
-                if not is_regional:
-                    clean_title = re.sub(r'\(\d{4}\).*', '', r["title"] or "").strip()
-                    query = f"{clean_title} {r['year'] or ''}".strip()
-                    c_url = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={quote(query)}.json"
-                    with httpx.Client(timeout=6, follow_redirects=True) as client:
-                        cr = client.get(c_url)
-                        metas = cr.json().get("metas", [])
-                        if metas and metas[0].get("id") and str(metas[0]["id"]).startswith("tt"):
-                            meta_name = (metas[0].get("name") or "").lower()
-                            clean_name = re.sub(r'[^a-z0-9 ]', '', clean_title.lower()).strip()
-                            if clean_name and (clean_name in meta_name or meta_name in clean_name):
-                                imdb_id = metas[0]["id"]
-                                fallback_url = f"https://vidsrc.sh/embed/movie?imdb={imdb_id}"
-                                return StreamInfo(
-                                    kind="iframe",
-                                    url=fallback_url,
-                                    servers=[{"label": "vidsrc.sh", "url": fallback_url}],
-                                    ttl_s=STREAM_TTL,
-                                )
+                tid = r["tmdb_id"]
+                if not tid:
+                    clean_t = re.sub(r"\s*\(\d{4}\).*", "", r["title"] or "").strip()
+                    clean_t = re.sub(r"\.\.+$", "", clean_t).strip()
+                    if clean_t:
+                        try:
+                            tmdb_r = httpx.get(
+                                "https://api.tmdb.org/3/search/movie",
+                                params={"api_key": "15d2ea6d0dc1d476efbca3eba2b9bbfb", "query": clean_t},
+                                timeout=4,
+                            )
+                            if tmdb_r.status_code == 200:
+                                res_list = tmdb_r.json().get("results", [])
+                                if res_list:
+                                    tid = str(res_list[0]["id"])
+                        except Exception:
+                            pass
+                if tid:
+                    from ..embed_helper import enrich_stream_servers
+                    is_series = bool(r["is_series"])
+                    dummy_url = f"https://vidlink.pro/{'tv' if is_series else 'movie'}/{tid}"
+                    main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tid))
+                    return StreamInfo(
+                        kind="iframe",
+                        url=main_url,
+                        servers=servers,
+                        ttl_s=STREAM_TTL,
+                    )
         except Exception:
             pass
 

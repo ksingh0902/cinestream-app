@@ -34,8 +34,8 @@ class Movies7Adapter(SourceAdapter):
     def enrich(self, item: MediaItem) -> MediaItem:
         return item
 
-    def resolve_stream(self, detail_url: str) -> StreamInfo:
-        return resolver.resolve(detail_url)
+    def resolve_stream(self, detail_url: str, *args, **kwargs) -> StreamInfo:
+        return resolver.resolve(detail_url, *args, **kwargs)
 
 
 adapter = Movies7Adapter()

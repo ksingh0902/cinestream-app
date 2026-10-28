@@ -243,11 +243,41 @@ option {
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Horizontal Category Filter Bar - Strictly Pan X without blocking vertical scroll */
+/* Horizontal category/tag rail. Arrows keep overflow discoverable on TV
+   remotes where the hidden scrollbar cannot be dragged. */
+.rail-shell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.rail-arrow {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 50%;
+  background: rgba(20,22,29,.96);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .15s ease, background .15s ease, border-color .15s ease;
+  z-index: 2;
+}
+.rail-arrow:hover,
+.rail-arrow:focus-visible { background: var(--accent); border-color: var(--accent); outline: none; }
+.rail-arrow:disabled { opacity: .28; cursor: default; background: rgba(20,22,29,.72); }
+.rail-arrow.rail-empty { visibility: hidden; pointer-events: none; }
 .filter-bar {
   display: flex;
   gap: 6px;
-  padding: 10px 14px 6px;
+  padding: 10px 2px 6px;
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
@@ -260,6 +290,7 @@ option {
   max-width: 100%;
   box-sizing: border-box;
 }
+.filter-rail .filter-bar { flex: 1 1 auto; min-width: 0; }
 .filter-bar::-webkit-scrollbar {
   display: none;
 }
@@ -651,6 +682,9 @@ option {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
 }
+.cw-rail { padding: 0 0 2px; }
+.cw-rail .cw-carousel { flex: 1 1 auto; min-width: 0; }
+.cw-rail .rail-arrow { flex-basis: 32px; width: 32px; height: 32px; }
 .cw-carousel::-webkit-scrollbar {
   display: none;
 }
@@ -2368,7 +2402,9 @@ body.watch-page .syn { margin:0; line-height:1.65; }
 </header>
 
 <!-- Quick Primary Category Pill Filter Bar (With Genre dropdown right after Movies) -->
-<nav class="filter-bar" id="filter-bar">
+<div class="rail-shell filter-rail" id="filter-rail">
+ <button class="rail-arrow" id="filter-left" type="button" onclick="scrollHorizontalRail('filter-bar', -1)" aria-label="Show previous categories">‹</button>
+ <nav class="filter-bar" id="filter-bar">
   <button class="pill pill-all active" data-kind="" data-genre="" data-source="" onclick="setQuickFilter('', '', '')">✨ All Titles</button>
   <button class="pill pill-dub" data-kind="" data-genre="Hollywood Dubbed" data-source="" onclick="setQuickFilter('', 'Hollywood Dubbed', '')">🎙️ Hindi Dubbed</button>
   <button class="pill pill-punjabi" data-kind="" data-genre="Punjabi" data-source="" onclick="setQuickFilter('', 'Punjabi', '')">🌾 Punjabi</button>
@@ -2399,7 +2435,9 @@ body.watch-page .syn { margin:0; line-height:1.65; }
       <option value="src:yomovies">🎬 ym</option>
     </optgroup>
   </select>
-</nav>
+ </nav>
+ <button class="rail-arrow" id="filter-right" type="button" onclick="scrollHorizontalRail('filter-bar', 1)" aria-label="Show more categories">›</button>
+</div>
 
 <!-- Continue Watching Section -->
 <section id="cw-section" class="cw-section" style="display:none;">
@@ -2417,7 +2455,11 @@ body.watch-page .syn { margin:0; line-height:1.65; }
       </button>
     </div>
   </div>
-  <div class="cw-carousel" id="cw-carousel"></div>
+  <div class="rail-shell cw-rail">
+    <button class="rail-arrow" id="cw-left" type="button" onclick="scrollHorizontalRail('cw-carousel', -1)" aria-label="Show previous continue-watching titles">‹</button>
+    <div class="cw-carousel" id="cw-carousel"></div>
+    <button class="rail-arrow" id="cw-right" type="button" onclick="scrollHorizontalRail('cw-carousel', 1)" aria-label="Show more continue-watching titles">›</button>
+  </div>
 </section>
 
 <div id="grid">
@@ -2448,6 +2490,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
         <button id="btn-cc" class="btn-action" onclick="toggleCC()" title="Toggle English Subtitles (Press C)">CC: English (ON)</button>
       </div>
     </div>
+    <div id="server-switcher" style="display:none;gap:8px;padding:8px 0 12px;flex-wrap:wrap;align-items:center;"></div>
     <div class="player-container" id="player-container">
       <!-- Fullscreen Top Controls Bar -->
       <div id="fs-top-bar" class="fs-top-bar" style="display:none;">
@@ -2494,7 +2537,6 @@ body.watch-page .syn { margin:0; line-height:1.65; }
         </div>
       </div>
     </div>
-    <div id="server-switcher" style="display:none;gap:8px;padding:8px 0;flex-wrap:wrap;"></div>
     <div id="alt-source-wrap" style="display:none;margin-top:8px;font-size:12.5px;color:var(--dim);"></div>
     <div class="status-wrap">
       <div class="status" id="p-status"></div>
@@ -2687,7 +2729,35 @@ function handleThumbImgError(img) {
 /* =========================================================================
    Continue Watching & Playback Progress (Independent Browser Storage)
    ========================================================================= */
-const CW_KEY = 'cinemymovies_continue_watching';
+const CW_KEY_PREFIX = 'cinemymovies_continue_watching:';
+const LEGACY_CW_KEY = 'cinemymovies_continue_watching';
+let cwStorageScope = 'anonymous';
+
+function getContinueWatchingKey() {
+  return CW_KEY_PREFIX + encodeURIComponent(cwStorageScope);
+}
+
+function setContinueWatchingScope(username, role) {
+  const nextScope = String(role || 'viewer') + ':' + String(username || role || 'viewer');
+  if (nextScope === cwStorageScope) return;
+  cwStorageScope = nextScope;
+
+  // Older releases used one shared browser key. Preserve that history for
+  // the viewer account once, but never show it to an administrator.
+  if (String(role || '').toLowerCase() === 'viewer') {
+    try {
+      const scopedKey = getContinueWatchingKey();
+      if (!window.localStorage.getItem(scopedKey)) {
+        const legacy = window.localStorage.getItem(LEGACY_CW_KEY);
+        if (legacy) {
+          window.localStorage.setItem(scopedKey, legacy);
+          window.localStorage.removeItem(LEGACY_CW_KEY);
+        }
+      }
+    } catch (_) {}
+  }
+}
+
 let activeContentId = null;
 let targetSeekTime = 0;
 let lastProgressSaveTime = 0;
@@ -2711,7 +2781,7 @@ const StorageManager = {
   getAll() {
     try {
       if (!this.isAvailable()) return [];
-      const raw = window.localStorage.getItem(CW_KEY);
+      const raw = window.localStorage.getItem(getContinueWatchingKey());
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
@@ -2748,17 +2818,17 @@ const StorageManager = {
   clearAll() {
     try {
       if (!this.isAvailable()) return;
-      window.localStorage.removeItem(CW_KEY);
+      window.localStorage.removeItem(getContinueWatchingKey());
     } catch(e) {}
   },
   _write(list) {
     try {
-      window.localStorage.setItem(CW_KEY, JSON.stringify(list));
+      window.localStorage.setItem(getContinueWatchingKey(), JSON.stringify(list));
     } catch(e) {
       try {
         if (list.length > 1) {
           const trimmed = list.slice(0, Math.max(1, Math.floor(list.length / 2)));
-          window.localStorage.setItem(CW_KEY, JSON.stringify(trimmed));
+          window.localStorage.setItem(getContinueWatchingKey(), JSON.stringify(trimmed));
         }
       } catch(_) {}
     }
@@ -2811,6 +2881,42 @@ function formatRemaining(sec) {
   }
   return `${Math.max(1, m)}m left`;
 }
+
+function updateHorizontalRailControls(id) {
+  const rail = document.getElementById(id);
+  if (!rail) return;
+  const isFilter = id === 'filter-bar';
+  const left = document.getElementById(isFilter ? 'filter-left' : 'cw-left');
+  const right = document.getElementById(isFilter ? 'filter-right' : 'cw-right');
+  if (!left || !right) return;
+
+  const hasOverflow = rail.scrollWidth > rail.clientWidth + 4;
+  left.classList.toggle('rail-empty', !hasOverflow);
+  right.classList.toggle('rail-empty', !hasOverflow);
+  left.disabled = !hasOverflow || rail.scrollLeft <= 2;
+  right.disabled = !hasOverflow || rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 2;
+}
+
+function scrollHorizontalRail(id, direction) {
+  const rail = document.getElementById(id);
+  if (!rail) return;
+  const amount = Math.max(220, Math.floor(rail.clientWidth * 0.72));
+  rail.scrollBy({ left: direction * amount, behavior: 'smooth' });
+  setTimeout(() => updateHorizontalRailControls(id), 260);
+}
+
+['filter-bar', 'cw-carousel'].forEach((id) => {
+  const rail = document.getElementById(id);
+  if (rail) rail.addEventListener('scroll', () => updateHorizontalRailControls(id), { passive: true });
+});
+window.addEventListener('resize', () => {
+  updateHorizontalRailControls('filter-bar');
+  updateHorizontalRailControls('cw-carousel');
+}, { passive: true });
+requestAnimationFrame(() => {
+  updateHorizontalRailControls('filter-bar');
+  updateHorizontalRailControls('cw-carousel');
+});
 
 function renderContinueWatching() {
   const section = document.getElementById('cw-section');
@@ -2867,6 +2973,7 @@ function renderContinueWatching() {
   }).join('');
 
   section.style.display = 'block';
+  requestAnimationFrame(() => updateHorizontalRailControls('cw-carousel'));
 }
 
 function removeCwItem(contentId, e) {
@@ -3101,12 +3208,14 @@ async function checkAuthSession() {
       const data = await r.json();
       if (!data.authenticated) {
         isAuthenticated = false;
+        cwStorageScope = 'anonymous';
         const cwSec = document.getElementById('cw-section');
         if (cwSec) cwSec.style.display = 'none';
         window.location.replace('/login?notice=Session+revoked.+Please+log+in+again.');
         return;
       }
       isAuthenticated = true;
+      setContinueWatchingScope(data.username, data.role);
       renderContinueWatching();
       if (data.role === 'admin') {
         const adminBtn = document.getElementById('btn-admin-link');
@@ -3114,6 +3223,7 @@ async function checkAuthSession() {
       }
     } else if (r.status === 401) {
       isAuthenticated = false;
+      cwStorageScope = 'anonymous';
       const cwSec = document.getElementById('cw-section');
       if (cwSec) cwSec.style.display = 'none';
       window.location.replace('/login?notice=Session+expired.+Please+log+in+again.');

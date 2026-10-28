@@ -69,15 +69,25 @@ def _get_client() -> httpx.Client:
     )
 
 
-def fetch_tmdb_endpoint(endpoint: str, page: int = 1, client: Optional[httpx.Client] = None) -> dict:
+def fetch_tmdb_endpoint(
+    endpoint: str,
+    page: int = 1,
+    extra_params: Optional[dict] = None,
+    client: Optional[httpx.Client] = None,
+) -> dict:
     """Query TMDB endpoint trying keys/hosts with fallback."""
     local_client = client or _get_client()
+    base_params = {"page": page, "language": "en-US"}
+    if extra_params:
+        base_params.update(extra_params)
     try:
         for host in CFG.tmdb_hosts:
             for key in CFG.tmdb_keys:
                 try:
                     url = f"https://{host}/3/{endpoint}"
-                    resp = local_client.get(url, params={"api_key": key, "page": page, "language": "en-US"})
+                    q_params = dict(base_params)
+                    q_params["api_key"] = key
+                    resp = local_client.get(url, params=q_params)
                     if resp.status_code == 200:
                         return resp.json()
                 except Exception:
@@ -102,6 +112,9 @@ def normalize_item(raw: dict, is_series: bool = False) -> Optional[MediaItem]:
     year = None
     if date_str and len(date_str) >= 4 and date_str[:4].isdigit():
         year = int(date_str[:4])
+
+    if not year or year > 2026:
+        return None
 
     orig_lang = raw.get("original_language") or "en"
     lang_name = LANGUAGE_NAMES.get(orig_lang, orig_lang.upper())
@@ -142,16 +155,22 @@ def normalize_item(raw: dict, is_series: bool = False) -> Optional[MediaItem]:
 
 
 def iter_catalog(*, max_pages: int = 0) -> Iterator[MediaItem]:
-    """Yield MediaItems from Movies7 endpoints (movies and webseries)."""
+    """Yield MediaItems from Movies7 home sections & tabs (movies and webseries)."""
     endpoints = [
-        ("movie/popular", False),
-        ("tv/popular", True),
-        ("movie/top_rated", False),
-        ("tv/top_rated", True),
-        ("movie/now_playing", False),
-        ("tv/on_the_air", True),
-        ("trending/movie/week", False),
-        ("trending/tv/week", True),
+        ("movie/popular", False, None),
+        ("tv/popular", True, None),
+        ("movie/top_rated", False, None),
+        ("tv/top_rated", True, None),
+        ("movie/now_playing", False, None),
+        ("tv/on_the_air", True, None),
+        ("movie/upcoming", False, None),
+        ("trending/movie/week", False, None),
+        ("trending/tv/week", True, None),
+        ("discover/movie", False, {"with_genres": "878", "sort_by": "popularity.desc"}),
+        ("discover/movie", False, {"with_genres": "16", "sort_by": "popularity.desc"}),
+        ("discover/movie", False, {"with_genres": "53", "vote_average.gte": "8", "sort_by": "popularity.desc"}),
+        ("discover/movie", False, {"with_genres": "27", "sort_by": "popularity.desc"}),
+        ("discover/tv", True, {"with_genres": "99", "sort_by": "popularity.desc"}),
     ]
 
     pages_per_endpoint = max_pages if max_pages > 0 else 5
@@ -160,9 +179,9 @@ def iter_catalog(*, max_pages: int = 0) -> Iterator[MediaItem]:
     seen_ids = set()
 
     try:
-        for ep, is_series in endpoints:
+        for ep, is_series, extra_params in endpoints:
             for p in range(1, pages_per_endpoint + 1):
-                data = fetch_tmdb_endpoint(ep, page=p, client=client)
+                data = fetch_tmdb_endpoint(ep, page=p, extra_params=extra_params, client=client)
                 results = data.get("results") or []
                 if not results:
                     break

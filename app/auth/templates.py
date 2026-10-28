@@ -521,9 +521,10 @@ input[type="text"]:focus, input[type="password"]:focus {{
       <div class="desc">Active Session Version: v{admin_ver}</div>
     </div>
     <div class="stat-card">
-      <div class="label">Active Sessions</div>
-      <div class="val">{session_counts.get("total", 0)}</div>
-      <div class="desc">{session_counts.get("viewer", 0)} viewers, {session_counts.get("admin", 0)} admin</div>
+      <div class="label">Active Devices (estimated)</div>
+      <div class="val">{session_counts.get("device_total", 0)}</div>
+      <div class="desc">{session_counts.get("viewer_devices", 0)} viewer devices, {session_counts.get("admin_devices", 0)} admin devices</div>
+      <div class="desc">{session_counts.get("total", 0)} active sessions</div>
     </div>
   </div>
 

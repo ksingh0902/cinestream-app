@@ -22,10 +22,11 @@ _filter_cache_lock = threading.Lock()
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Ultra-fast, read-optimized SQLite connection without migration overhead."""
+    """Ultra-fast, read-optimized SQLite connection with 30s busy timeout and WAL mode."""
     target_path = "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db"
-    conn = sqlite3.connect(target_path, timeout=10, check_same_thread=False)
+    conn = sqlite3.connect(target_path, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA query_only=ON")
     conn.execute("PRAGMA cache_size = -64000")
     conn.execute("PRAGMA mmap_size = 268435456")
@@ -37,39 +38,48 @@ def _normalized_title(title: str | None) -> str:
     value = (title or "").lower()
     value = re.sub(r"\s*[\[(]\s*(?:19|20)\d{2}\s*[\])]", " ", value)
     value = re.sub(r"\s+(?:19|20)\d{2}\s*$", " ", value)
-    value = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual[ -]?audio|english dubbed|english|hindi)\b", " ", value)
+    value = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual[ -]?audio|english dubbed|english|hindi|punjabi|tamil|telugu)\b", " ", value)
+    # Strip Season / Episode / Part / Volume tags (e.g. Season 1, S01, Episode 1-8, Part 2)
+    value = re.sub(r"\b(?:season\s*\d+|s\d+|episode\s*\d+|ep\s*\d+|part\s*\d+|vol\s*\d+)\b", " ", value)
+    # Strip OTT platform tags and release descriptors (e.g. Netflix, Amazon Prime, Hotstar, Zee5, SonyLIV, etc.)
+    value = re.sub(r"\b(?:netflix|amazon|prime|hotstar|zee5|sonyliv|hungama|voot|jiocinema|apple tv|disney|hbo|hulu|originals?)\b", " ", value)
+    value = re.sub(r"\b(?:watch online.*|full movie|web series)\b", " ", value)
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
 
 _non_m7_title_keys: set[tuple[str, str]] | None = None
+_non_m7_base_titles: set[str] | None = None
 _non_m7_title_keys_lock = threading.Lock()
 
 
-def _get_non_m7_title_keys() -> set[tuple[str, str]]:
-    global _non_m7_title_keys
+def _get_non_m7_title_keys() -> tuple[set[tuple[str, str]], set[str]]:
+    global _non_m7_title_keys, _non_m7_base_titles
     with _non_m7_title_keys_lock:
-        if _non_m7_title_keys is not None:
-            return _non_m7_title_keys
+        if _non_m7_title_keys is not None and _non_m7_base_titles is not None:
+            return _non_m7_title_keys, _non_m7_base_titles
         with get_db_connection() as conn:
             rows = conn.execute(
                 "SELECT title, year FROM movies WHERE source IN ('yomovies', 'dooflix', 'ask4movie') AND title IS NOT NULL"
             ).fetchall()
             keys = set()
+            base_titles = set()
             for r in rows:
                 nt = _normalized_title(r["title"])
                 yr = str(r["year"] or "").strip()
                 if nt:
                     keys.add((nt, yr))
                     keys.add((nt, ""))
+                    base_titles.add(nt)
             _non_m7_title_keys = keys
-            return _non_m7_title_keys
+            _non_m7_base_titles = base_titles
+            return _non_m7_title_keys, _non_m7_base_titles
 
 
 def is_movie_available_on_primary_sources(title: str | None, year: str | int | None) -> bool:
     """Returns True if this movie is already available on Yomovies, Dooflix, or Ask4movie."""
     if not title:
         return False
-    keys = _get_non_m7_title_keys()
+    keys, base_titles = _get_non_m7_title_keys()
     nt = _normalized_title(title)
     if not nt:
         return False
@@ -80,46 +90,26 @@ def is_movie_available_on_primary_sources(title: str | None, year: str | int | N
         y_int = int(yr)
         if (nt, str(y_int - 1)) in keys or (nt, str(y_int + 1)) in keys:
             return True
+    if nt in base_titles:
+        return True
     return False
 
 
 def invalidate_catalog_cache() -> None:
     """Clear in-memory catalog cache when new titles are synced or updated."""
-    global _non_m7_title_keys
+    global _non_m7_title_keys, _non_m7_base_titles
     with _filter_cache_lock:
         _filter_cache.clear()
     with _non_m7_title_keys_lock:
         _non_m7_title_keys = None
+        _non_m7_base_titles = None
 
 
 def prewarm_catalog_cache() -> None:
-    """Precompute common filter views in a background thread so first loads are instant."""
-    common_filters = [
-        {},                                          # All titles
-        {"genre": "bollywood"},                     # Bollywood
-        {"genre": "punjabi"},                       # Punjabi
-        {"genre": "hollywood"},                     # Hollywood
-        {"genre": "hindi dubbed"},                  # Hindi Dubbed
-        {"genre": "animation"},                     # Animation
-        {"series": 1},                              # Web Series
-        {"series": 0},                              # Movies
-        {"genre": "action"},                        # Action
-        {"genre": "comedy"},                        # Comedy
-        {"source": "movies7"},                      # 7
-        {"source": "ask4movie"},                    # ask
-        {"source": "dooflix"},                      # doo
-        {"source": "yomovies"},                     # ym
-    ]
-
-    def _worker():
-        for f in common_filters:
-            try:
-                movies(**f, page=1, per_page=48)
-            except Exception:
-                pass
-
-    t = threading.Thread(target=_worker, name="catalog-prewarm", daemon=True)
-    t.start()
+    """Lazy cache warming: views are cached on-demand when requested by users.
+    Boot-time batch prewarming is disabled to protect VM CPU and memory.
+    """
+    return
 
 
 def _audio_edition(item: dict) -> str:

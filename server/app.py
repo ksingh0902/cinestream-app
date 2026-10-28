@@ -62,16 +62,11 @@ async def _periodic_sync_loop():
 @app.on_event("startup")
 async def startup_sync_scheduler():
     init_auth_db()
-    try:
-        from app.api.routes_catalog import prewarm_catalog_cache
-        prewarm_catalog_cache()
-    except Exception as e:
-        print(f"[startup] Failed to prewarm catalog cache: {e}", flush=True)
+    # Fast startup: do not block boot or burn CPU with heavy multi-view prewarming.
+    # Cache warming is handled lazily on-demand per user request.
     global _sync_task
-    # Production web workers must not crawl large catalogues while serving users.
-    # Keep the opt-out explicit for development/import environments.
-    auto_sync_default = "1" if os.getenv("ENVIRONMENT", "").lower() == "production" else "0"
-    if os.getenv("DISABLE_AUTO_SYNC", auto_sync_default) != "1":
+    # Production web workers must strictly serve traffic. Background scraping is decoupled.
+    if os.getenv("ENABLE_AUTO_SYNC", "0") == "1" and os.getenv("DISABLE_AUTO_SYNC", "0") != "1":
         _sync_task = asyncio.create_task(_periodic_sync_loop())
 
 @app.on_event("shutdown")

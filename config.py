@@ -3,7 +3,7 @@ import os
 
 # --- upstream site (R3: list of mirrors, first healthy one wins) ---
 SITE_MIRRORS = [m.strip().rstrip("/") for m in os.getenv(
-    "SITE_MIRRORS", "https://yomovies.wine").split(",") if m.strip()]
+    "SITE_MIRRORS", "https://yomovies.exchange,https://yomovies.wine").split(",") if m.strip()]
 
 # fallback only used if the page gives us no absolute embed URL
 DEFAULT_EMBED_HOST = os.getenv("DEFAULT_EMBED_HOST", "https://speedostream1.com")

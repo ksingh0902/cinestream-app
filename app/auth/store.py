@@ -343,16 +343,76 @@ def delete_expired_sessions() -> int:
         return count
 
 
+def _device_family(user_agent: Optional[str]) -> str:
+    """Reduce a browser user-agent to a coarse device platform.
+
+    Browser names are intentionally ignored so Chrome/Edge/Firefox sessions on
+    the same computer can be represented as one estimated device. This is not
+    a hardware identifier; the IP address is combined with this family below.
+    """
+    ua = (user_agent or "").lower()
+    if "android" in ua:
+        return "android"
+    if "iphone" in ua or "ipad" in ua or "ipod" in ua:
+        return "ios"
+    if "windows" in ua:
+        return "windows"
+    if "mac os" in ua or "macintosh" in ua:
+        return "macos"
+    if "cros" in ua:
+        return "chromeos"
+    if "linux" in ua:
+        return "linux"
+    return "unknown"
+
+
 def count_active_sessions() -> Dict[str, int]:
-    """Count active unexpired sessions by role."""
+    """Count valid sessions and deduplicated estimated devices by role.
+
+    Every login creates a server session, so counting session rows overstates
+    devices when one person uses multiple browsers. A device estimate groups
+    active rows by public IP and coarse platform. Logout/revocation removes the
+    row immediately; expired rows are purged before counting.
+    """
     now = int(time.time())
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT role, COUNT(*) as cnt FROM auth_sessions WHERE expires_at >= ? GROUP BY role", (now,))
-        counts = {"admin": 0, "viewer": 0, "total": 0}
-        for r in cur.fetchall():
-            counts[r["role"]] = r["cnt"]
-            counts["total"] += r["cnt"]
+        cur.execute("DELETE FROM auth_sessions WHERE expires_at < ?", (now,))
+        conn.commit()
+        cur.execute(
+            """
+            SELECT session_id, role, ip_address, user_agent
+            FROM auth_sessions
+            WHERE expires_at >= ?
+            """,
+            (now,),
+        )
+
+        counts = {
+            "admin": 0,
+            "viewer": 0,
+            "total": 0,
+            "admin_devices": 0,
+            "viewer_devices": 0,
+            "device_total": 0,
+        }
+        devices = {"admin": set(), "viewer": set()}
+        for row in cur.fetchall():
+            role = row["role"]
+            if role not in ("admin", "viewer"):
+                continue
+            counts[role] += 1
+            counts["total"] += 1
+            ip = (row["ip_address"] or "").strip()
+            family = _device_family(row["user_agent"])
+            # Missing request metadata should not collapse every legacy row
+            # into one fake device; fall back to its unique session id.
+            fingerprint = f"{ip}|{family}" if ip else f"session:{row['session_id']}"
+            devices[role].add(fingerprint)
+
+        counts["admin_devices"] = len(devices["admin"])
+        counts["viewer_devices"] = len(devices["viewer"])
+        counts["device_total"] = len(devices["admin"] | devices["viewer"])
         return counts
 
 

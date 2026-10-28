@@ -30,17 +30,23 @@ class StreamResolver:
         if default_candidate not in candidates:
             candidates.append(default_candidate)
 
+        referers = [
+            "https://yomovies.exchange/",
+            "https://speedostream1.com/",
+            "https://yomovies.wine/",
+        ]
         for url in candidates:
             if not url:
                 continue
-            try:
-                html = self.http.get(url, referer="https://yomovies.wine/", force=True)
-                data = parse_embed(html)
-            except Exception:
-                data = None
-            if data:
-                data["embed_url"] = url
-                self._memo[code] = (time.time(), data)
-                return data
+            for ref in referers:
+                try:
+                    html = self.http.get(url, referer=ref, force=True)
+                    data = parse_embed(html)
+                except Exception:
+                    data = None
+                if data and data.get("hls"):
+                    data["embed_url"] = url
+                    self._memo[code] = (time.time(), data)
+                    return data
         self._memo[code] = (time.time(), None)
         return None

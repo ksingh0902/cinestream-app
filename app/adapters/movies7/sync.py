@@ -122,6 +122,12 @@ def sync_movies7(pages_per_category: int = 5) -> dict:
         logger.info("Fetched %d unique items from Movies7 endpoints", len(items))
 
         for it in items:
+            try:
+                from ...api.routes_catalog import is_movie_available_on_primary_sources
+                if is_movie_available_on_primary_sources(it.title, it.year):
+                    continue
+            except Exception:
+                pass
             for c in connections:
                 upsert_item(c, it)
             if it.is_series:

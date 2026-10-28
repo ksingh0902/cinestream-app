@@ -13,6 +13,7 @@ from ..adapters import registry
 from ..adapters.ask4movie.config import CFG
 from ..adapters.ask4movie.sync import connect
 from ..adapters.embed_helper import enrich_stream_servers
+from ..adapters.movies7 import resolver as movies7_resolver
 
 router = APIRouter()
 
@@ -161,7 +162,39 @@ def stream(
                 with connect() as conn:
                     conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
                     conn.commit()
-        if tmdb_id:
+        if source == "movies7":
+            s_num = target_season or 1
+            e_num = target_episode or 1
+            try:
+                info = movies7_resolver.resolve(
+                    row["detail_url"] or row["url"] or "",
+                    tmdb_id=tmdb_id,
+                    is_series=True,
+                    season=s_num,
+                    episode=e_num,
+                )
+                now = int(time.time())
+                with connect() as conn:
+                    conn.execute(
+                        "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
+                        (info.url, info.kind, json.dumps(info.servers), now, movie_id),
+                    )
+                    conn.commit()
+                return {
+                    "kind": info.kind,
+                    "url": info.url,
+                    "servers": info.servers,
+                    "headers": info.headers,
+                    "cached": False,
+                    "type": info.kind,
+                    "play": info.url,
+                    "movie_id": movie_id,
+                    "season": s_num,
+                    "episode": e_num,
+                }
+            except Exception:
+                pass
+        if tmdb_id and source != "movies7":
             s_num = target_season or 1
             e_num = target_episode or 1
             dummy_url = f"https://embed.vidsrc.si/embed/tv/{tmdb_id}/{s_num}/{e_num}?autoplay=1&ds_lang=en"
@@ -202,11 +235,27 @@ def stream(
         and "autoembed.cc" not in (row["player_url"] or "")
         and "cluster.dooflix.live" not in (row["player_url"] or "")
     )
-    if is_fresh and source == "dooflix" and row["player_kind"] == "iframe":
-        sid = str(row["source_id"] or "")
-        if not sid.startswith("tt"):
-            # For Indian/series titles, re-resolve to get native Speedostream HLS
+    # Older Movies7 responses were accidentally rewritten to the generic
+    # VidSrc server list.  Re-resolve those once so the adapter's native
+    # Movies7 player/servers are restored; valid Movies7 Videasy caches remain
+    # usable without another upstream request.
+    if is_fresh and source == "movies7":
+        cached_urls = [(row["player_url"] or "").lower()]
+        if row["servers_json"]:
+            try:
+                cached_urls.extend(
+                    str(server.get("url") or "").lower()
+                    for server in json.loads(row["servers_json"])
+                    if isinstance(server, dict)
+                )
+            except Exception:
+                pass
+        # Re-resolve movies7 cache so Cinesrc is primary for all movies7 titles
+        if "cinesrc" not in (row["player_url"] or "").lower():
             is_fresh = False
+    # Invalidate stale speedostream iframe embeds which show Embeds disabled3
+    if is_fresh and "speedostream" in (row["player_url"] or "").lower() and row["player_kind"] == "iframe":
+        is_fresh = False
 
     if is_fresh and not force_refresh:
         servers = []
@@ -218,7 +267,7 @@ def stream(
 
         p_kind = row["player_kind"] or adapter.player_kind
         p_url = row["player_url"]
-        if p_kind == "iframe":
+        if p_kind == "iframe" and source != "movies7":
             p_url, servers = enrich_stream_servers(p_url, is_series=bool(row["is_series"]), existing_servers=servers, tmdb_id=str(row["tmdb_id"] or ""))
             if source == "dooflix":
                 p_url, servers = _prioritize_dooflix_servers(servers)
@@ -343,7 +392,7 @@ def stream(
 
     try:
         info = None
-        if tmdb_id and (source == "ask4movie" or row["player_kind"] == "iframe"):
+        if tmdb_id and source != "movies7" and (source == "ask4movie" or row["player_kind"] == "iframe"):
             is_series = doo_is_series if source == "dooflix" else bool(row["is_series"])
             dummy_url = f"https://embed.vidsrc.si/embed/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "") + "?autoplay=1&ds_lang=en"
             main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
@@ -368,7 +417,16 @@ def stream(
                 info = None
 
         if not info:
-            info = adapter.resolve_stream(detail_url)
+            if source == "movies7":
+                info = movies7_resolver.resolve(
+                    detail_url,
+                    tmdb_id=tmdb_id,
+                    is_series=bool(row["is_series"]),
+                    season=season,
+                    episode=episode,
+                )
+            else:
+                info = adapter.resolve_stream(detail_url)
     except Exception as exc:                                      # noqa: BLE001
         if tmdb_id:
             is_series = doo_is_series if source == "dooflix" else bool(row["is_series"])
@@ -406,7 +464,7 @@ def stream(
                     pass
             p_kind = row["player_kind"] or adapter.player_kind
             p_url = row["player_url"]
-            if p_kind == "iframe":
+            if p_kind == "iframe" and source != "movies7":
                 p_url, servers = enrich_stream_servers(
                     p_url,
                     is_series=doo_is_series if source == "dooflix" else bool(row["is_series"]),
@@ -428,7 +486,7 @@ def stream(
             }
         raise HTTPException(502, str(exc)[:200])
 
-    if info.kind == "iframe":
+    if info.kind == "iframe" and source != "movies7":
         info.url, info.servers = enrich_stream_servers(
             info.url,
             is_series=doo_is_series if source == "dooflix" else bool(row["is_series"]),
