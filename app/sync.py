@@ -40,25 +40,30 @@ _LAST_SYNC_META = {
 }
 
 YOMOVIES_OTT_PAGES = [
-    ("/director/netflix/", 39),
-    ("/director/amazon-prime/", 14),
-    ("/director/zee5/", 5),
-    ("/director/hotstar/", 7),
-    ("/director/sonyliv-original/", 3),
+    ("/director/netflix/", 3),
+    ("/director/amazon-prime/", 3),
+    ("/director/hotstar/", 3),
+    ("/director/zee5/", 2),
+    ("/director/sonyliv-original/", 2),
 ]
 
 YOMOVIES_PAGES = [
     # (relative_path, max_pages)
-    ("/", 1),                      # Homepage featured & latest
-    ("/genre/top-rated/", 2),      # Mostly watched / Top rated
+    ("/", 3),                      # Homepage featured & latest
+    ("/movies/", 3),               # General movies
+    ("/genre/bollywood/", 2),      # Latest Bollywood
+    ("/genre/hollywood/", 2),      # Latest Hollywood
+    ("/genre/hollywood-dubbed/", 2), # Latest Hollywood Hindi Dubbed
+    ("/genre/dual-audio/", 2),     # Latest Dual Audio
+    ("/genre/south-special/", 2),  # Latest South Indian Dubbed
     ("/series/", 3),               # English & International TV Series
     ("/genre/web-series/", 2),     # Hindi Dubbed & Regional Web Series
     ("/genre/tv-shows/", 2),       # TV Shows
-    ("/release-year/2026/", 2),    # Current year releases
-    ("/genre/bollywood/", 1),      # Latest Bollywood
-    ("/genre/animation/", 100),    # Complete Animation catalogue (stops at last page)
-    ("/genre/punjabi/", 1),        # Latest Punjabi
-    ("/movies/", 1),               # General movies
+    ("/release-year/2026/", 3),    # Current year releases
+    ("/release-year/2025/", 2),    # Previous year new uploads
+    ("/genre/animation/", 3),      # Latest Animation additions
+    ("/genre/punjabi/", 2),        # Latest Punjabi
+    ("/genre/top-rated/", 2),      # Mostly watched / Top rated
 ] + YOMOVIES_OTT_PAGES
 
 YOMOVIES_FORCED_GENRES = {
@@ -106,9 +111,14 @@ def _is_hindi_dubbed(title: str, genres: list, quality: str) -> bool:
 
 def upsert_yomovies_item(conn: sqlite3.Connection, m: Dict[str, Any], updated_at: int) -> bool:
     """Upsert a Yomovies media dictionary into the database."""
-    # Strictly reject erotic / softcore content from Ullu, AltBalaji, etc.
+    # Strictly reject excluded content
     if is_erotic_content(m):
-        logger.info("Skipping excluded erotic title: %s (%s)", m.get("title"), m.get("url"))
+        logger.info("Skipping excluded title: %s (%s)", m.get("title"), m.get("url"))
+        return False
+
+    title = m.get("title") or ""
+    if any(k in title.lower() for k in ("gateway time-out", "error code", "504 gateway", "just a moment", "404 not found")):
+        logger.info("Skipping error page: %s", title)
         return False
 
     url = m.get("url") or ""
@@ -228,42 +238,58 @@ def sync_yomovies(
     base_time: int,
     pages: list[tuple[str, int]] | None = None,
     base_url: str | None = None,
+    base_urls: list[str] | None = None,
     enrich_details: bool = True,
     force_refresh: bool = True,
 ) -> Dict[str, int]:
-    """Sync latest items from Yomovies."""
-    base_url = (base_url or (SITE_MIRRORS[0] if SITE_MIRRORS else "https://yomovies.wine")).rstrip("/")
+    """Sync latest items from Yomovies & PRmovies mirrors into unified Yomovies catalogue."""
+    if base_urls:
+        target_bases = [b.rstrip("/") for b in base_urls if b]
+    elif base_url:
+        target_bases = [base_url.rstrip("/")]
+    else:
+        # Default to PRmovies (original/parent mirror) and Yomovies active mirror
+        target_bases = ["https://prmovies.ventures", "https://yomovies.com.im"]
+
     http = HttpClient(delay=0.1, cache_dir=".cache")
 
-    print(f"[sync-yomovies] Scraping latest items from {base_url}...", flush=True)
+    print(f"[sync-yomovies] Scraping latest items from mirrors: {', '.join(target_bases)}...", flush=True)
 
     urls_ordered: List[str] = []
     seen: set = set()
+    seen_slugs: set = set()
     forced_genres_by_url: Dict[str, set[str]] = {}
     listing_by_url: Dict[str, Dict[str, Any]] = {}
 
-    for path, max_p in (pages or YOMOVIES_PAGES):
-        for p in range(1, max_p + 1):
-            if path == "/":
-                url = base_url if p == 1 else f"{base_url}/page/{p}/"
-            else:
-                url = f"{base_url}{path}" if p == 1 else f"{base_url}{path}page/{p}/"
-            try:
-                html = http.get(url, force=force_refresh)
-                cards = parse_listing(html, base_url)
-                if not cards:
-                    break
-                new_in_page = 0
-                for c in cards:
-                    u = c.get("url")
-                    forced_genre = YOMOVIES_FORCED_GENRES.get(path)
-                    if u and forced_genre:
-                        forced_genres_by_url.setdefault(u, set()).add(forced_genre)
-                        genres = c.get("genres") or []
-                        if not any(str(g).lower() == forced_genre.lower() for g in genres):
-                            genres.append(forced_genre)
-                        c["genres"] = genres
-                    if u:
+    for current_base in target_bases:
+        print(f"[sync-yomovies] Checking mirror: {current_base}", flush=True)
+        for path, max_p in (pages or YOMOVIES_PAGES):
+            for p in range(1, max_p + 1):
+                if path == "/":
+                    url = current_base if p == 1 else f"{current_base}/page/{p}/"
+                else:
+                    url = f"{current_base}{path}" if p == 1 else f"{current_base}{path}page/{p}/"
+                try:
+                    html = http.get(url, force=force_refresh)
+                    cards = parse_listing(html, current_base)
+                    if not cards:
+                        break
+                    new_in_page = 0
+                    for c in cards:
+                        if is_erotic_content(c):
+                            continue
+                        u = c.get("url")
+                        if not u:
+                            continue
+                        slug = (u.rstrip("/").rsplit("/", 1)[-1] or "").lower()
+                        forced_genre = YOMOVIES_FORCED_GENRES.get(path)
+                        if forced_genre:
+                            forced_genres_by_url.setdefault(u, set()).add(forced_genre)
+                            genres = c.get("genres") or []
+                            if not any(str(g).lower() == forced_genre.lower() for g in genres):
+                                genres.append(forced_genre)
+                            c["genres"] = genres
+
                         if u in listing_by_url:
                             prev_genres = listing_by_url[u].get("genres") or []
                             cur_genres = c.get("genres") or []
@@ -275,16 +301,19 @@ def sync_yomovies(
                                     existing_g_lower.add(str(g).lower())
                             c["genres"] = merged_card_genres
                         listing_by_url[u] = c
-                    if u and u not in seen:
-                        seen.add(u)
-                        urls_ordered.append(u)
-                        new_in_page += 1
-                print(f"[sync-yomovies] [{path} p.{p}] Found {len(cards)} items ({new_in_page} new)", flush=True)
-                if p < max_p and not parse_pagination(html, base_url):
+
+                        if u not in seen and slug not in seen_slugs:
+                            seen.add(u)
+                            if slug:
+                                seen_slugs.add(slug)
+                            urls_ordered.append(u)
+                            new_in_page += 1
+                    print(f"[sync-yomovies] [{current_base} | {path} p.{p}] Found {len(cards)} items ({new_in_page} new)", flush=True)
+                    if p < max_p and not parse_pagination(html, current_base):
+                        break
+                except Exception as e:
+                    print(f"[sync-yomovies] Error fetching {url}: {e}", flush=True)
                     break
-            except Exception as e:
-                print(f"[sync-yomovies] Error fetching {url}: {e}", flush=True)
-                break
 
     print(f"[sync-yomovies] Total unique URLs to ingest/refresh: {len(urls_ordered)}", flush=True)
 
@@ -298,6 +327,10 @@ def sync_yomovies(
         for idx, u in enumerate(urls_ordered):
             info = listing_by_url.get(u)
             if not info or not info.get("title"):
+                continue
+
+            t_low = info.get("title", "").lower()
+            if any(k in t_low for k in ("gateway time-out", "error code", "504", "just a moment", "404 not found")):
                 continue
             genres = info.get("genres") or []
             existing_genres = {str(genre).lower() for genre in genres}
@@ -336,8 +369,8 @@ def sync_yomovies(
                     break
 
             info = None
-            if existing_row and existing_row.get("embeds") and existing_row.get("embeds") != "[]" and existing_row.get("synopsis"):
-                # Fast path: title already scraped with full embeds & synopsis
+            if existing_row:
+                # Fast path: title already in catalogue, refresh recency order
                 info = existing_row
                 for k in ("genres", "actors", "director", "country", "embeds", "downloads"):
                     if isinstance(info.get(k), str):
@@ -346,11 +379,26 @@ def sync_yomovies(
                         except Exception:
                             pass
             else:
-                # Scrape detail page
+                # Newly added title: scrape detail page with full embeds & metadata
                 html = http.get(u, force=True)
                 info = parse_detail(html, u)
+                if info and info.get("is_series") and not info.get("embeds") and info.get("episodes"):
+                    try:
+                        ep_url = info["episodes"][0]
+                        ep_html = http.get(ep_url, force=True)
+                        ep_info = parse_detail(ep_html, ep_url)
+                        if ep_info.get("embeds"):
+                            info["embeds"] = ep_info["embeds"]
+                        if not info.get("tmdb_id") and ep_info.get("tmdb_id"):
+                            info["tmdb_id"] = ep_info["tmdb_id"]
+                    except Exception as e_ep:
+                        logger.debug("Failed fetching series episode embeds: %s", e_ep)
 
             if not info or not info.get("title"):
+                continue
+
+            t_low = info.get("title", "").lower()
+            if any(k in t_low for k in ("gateway time-out", "error code", "504", "just a moment", "404 not found")):
                 continue
 
             forced_genres = forced_genres_by_url.get(u, set())

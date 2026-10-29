@@ -1748,6 +1748,7 @@ body.modal-open {
 .player-container:fullscreen,
 .player-container:-webkit-full-screen,
 .player-container:-moz-full-screen,
+.player-container.is-fullscreen,
 video:fullscreen,
 video:-webkit-full-screen,
 video:-moz-full-screen,
@@ -2587,6 +2588,7 @@ const pIframe = document.getElementById('p-iframe');
 
 let page = 1, totalPages = 1, hls = null, curId = null, refreshing = false, keepTime = 0;
 let skipAccumulator = 0, skipResetTimer = null, hudTimer = null, stallCheckTimer = null;
+let isActivelyPlaying = false, isSeekingActive = false, seekTargetTime = null;
 let currentStreamAbort = null, currentResolveSeq = 0;
 let activeGenre = '';
 let lastTotal = 0, lastPerPage = 48;
@@ -3056,6 +3058,7 @@ function tryApplySeek() {
       lastKnownPlayTime = dest;
       showHud(`Resumed from ${formatTime(dest)}`);
       targetSeekTime = 0;
+      keepTime = 0;
       video.play().catch(()=>{});
     } catch(e) {
       console.warn('Seek error:', e);
@@ -3070,6 +3073,8 @@ function savePlaybackProgress(force = false) {
 
   if (isNaN(currentTime) || currentTime < 5) return;
   if (isNaN(duration) || duration <= 0) return;
+  // Guard against overwriting saved position if player was just reloaded and currentTime hasn't caught up
+  if (targetSeekTime > 10 && currentTime < 10) return;
 
   // 95% Completion rule: remove from continue watching
   if (video.ended || (currentTime / duration) >= 0.95) {
@@ -3533,10 +3538,37 @@ function showHud(text){
   hudTimer = setTimeout(()=>{ hudEl.classList.remove('show'); }, 850);
 }
 
-/* 10s Skip Handler with Instant Recovery (Never pauses or gets stuck) */
+/* 10s Skip Handler with Instant Recovery (Never pauses or gets stuck on TV remote) */
 function handleSkip(direction){
+  const isIframeActive = pIframe && pIframe.style.display !== 'none';
+  if(isIframeActive){
+    const sec = direction * 10;
+    if(direction > 0){
+      if(skipAccumulator < 0) skipAccumulator = 0;
+      skipAccumulator += 10;
+    } else {
+      if(skipAccumulator > 0) skipAccumulator = 0;
+      skipAccumulator -= 10;
+    }
+    const text = skipAccumulator > 0 ? `⏩ +${skipAccumulator}s` : `⏪ ${skipAccumulator}s`;
+    showHud(text);
+    clearTimeout(skipResetTimer);
+    skipResetTimer = setTimeout(()=>{ skipAccumulator = 0; }, 750);
+    try {
+      if(pIframe.contentWindow){
+        pIframe.contentWindow.postMessage({ type: 'seek', offset: sec }, '*');
+        pIframe.contentWindow.postMessage({ event: 'seek', value: sec }, '*');
+        pIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seek', args: [sec] }), '*');
+      }
+    } catch(_){}
+    return;
+  }
+
   if(!video) return;
-  const wasPlaying = !video.paused;
+
+  // Track playback intent: if playing, seeking, or previously active, keep playing
+  const wasPlaying = isActivelyPlaying || !video.paused || video.seeking || isSeekingActive;
+  if(wasPlaying) isActivelyPlaying = true;
 
   if(direction > 0){
     if(skipAccumulator < 0) skipAccumulator = 0;
@@ -3546,21 +3578,47 @@ function handleSkip(direction){
     skipAccumulator -= 10;
   }
 
-  const duration = (video.duration && !isNaN(video.duration)) ? video.duration : 999999;
-  const targetTime = Math.max(0, Math.min(duration - 1, video.currentTime + (direction * 10)));
-  video.currentTime = targetTime;
+  const duration = (video.duration && !isNaN(video.duration) && isFinite(video.duration)) ? video.duration : 999999;
+  const baseTime = (seekTargetTime !== null && isSeekingActive) ? seekTargetTime : video.currentTime;
+  seekTargetTime = Math.max(0, Math.min(duration - 1, baseTime + (direction * 10)));
+  isSeekingActive = true;
+
+  if(typeof video.fastSeek === 'function'){
+    try { video.fastSeek(seekTargetTime); } catch(_) { video.currentTime = seekTargetTime; }
+  } else {
+    video.currentTime = seekTargetTime;
+  }
 
   const text = skipAccumulator > 0 ? `⏩ +${skipAccumulator}s` : `⏪ ${skipAccumulator}s`;
   showHud(text);
 
-  // Resume playback immediately if it was active
-  if(wasPlaying){
-    const p = video.play();
-    if(p && typeof p.catch === 'function') p.catch(()=>{});
-  }
-
   clearTimeout(skipResetTimer);
-  skipResetTimer = setTimeout(()=>{ skipAccumulator = 0; }, 750);
+  skipResetTimer = setTimeout(()=>{
+    skipAccumulator = 0;
+    seekTargetTime = null;
+    isSeekingActive = false;
+  }, 750);
+
+  // Instant recovery: guarantee the player resumes playback after seeking
+  if(wasPlaying){
+    const resumePlay = () => {
+      if(video.paused){
+        const p = video.play();
+        if(p && typeof p.catch === 'function'){
+          p.catch(()=>{
+            const onReady = () => {
+              video.removeEventListener('canplay', onReady);
+              video.removeEventListener('seeked', onReady);
+              if(isActivelyPlaying && video.paused) video.play().catch(()=>{});
+            };
+            video.addEventListener('canplay', onReady, { once: true });
+            video.addEventListener('seeked', onReady, { once: true });
+          });
+        }
+      }
+    };
+    resumePlay();
+  }
 }
 
 // Double click left or right half of player to skip 10s
@@ -3577,24 +3635,78 @@ if(playerContainer){
   });
 }
 
-// Ensure smooth resume upon seeking / buffering
-video.addEventListener('seeked', ()=>{
-  clearTimeout(stallCheckTimer);
-  if(!video.paused) return;
-  stallCheckTimer = setTimeout(()=>{
-    if(video.paused && overlay.classList.contains('on')){
-      video.play().catch(()=>{});
-    }
-  }, 250);
+// Track actual playback state accurately
+video.addEventListener('play', ()=>{ isActivelyPlaying = true; });
+video.addEventListener('playing', ()=>{
+  isActivelyPlaying = true;
+  if(curId) statusEl.textContent = `Playing title · Stream active`;
 });
-
+video.addEventListener('pause', ()=>{
+  // Transient pause during seek buffer should not be treated as user pause
+  if(!video.seeking && !isSeekingActive){
+    isActivelyPlaying = false;
+  }
+});
 video.addEventListener('waiting', ()=>{
   statusEl.innerHTML = `<span class="spinner"></span> Buffering…`;
 });
 
-video.addEventListener('playing', ()=>{
-  if(curId) statusEl.textContent = `Playing title · Stream active`;
+// Ensure instant resume upon seek completion
+video.addEventListener('seeked', ()=>{
+  clearTimeout(stallCheckTimer);
+  if(isActivelyPlaying && video.paused){
+    video.play().catch(()=>{});
+  }
 });
+video.addEventListener('canplay', ()=>{
+  if(isActivelyPlaying && video.paused){
+    video.play().catch(()=>{});
+  }
+});
+
+/* W3C MediaSession API for Smart TV Remotes (Fire TV, Android TV, Tizen, webOS) */
+function setupMediaSession(title, poster){
+  if(!('mediaSession' in navigator)) return;
+  try {
+    const curItem = (curId && window.movieCache?.get(curId)) || {};
+    const mediaTitle = title || curItem.title || document.getElementById('p-title')?.textContent || 'CineMyMovies';
+    const mediaPoster = poster || curItem.poster || '';
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: mediaTitle.replace(/^[\s·\-_]+|[\s·\-_]+$/g, ''),
+      artist: 'CineMyMovies',
+      album: 'Movies & TV',
+      artwork: mediaPoster ? [{ src: mediaPoster, sizes: '512x512', type: 'image/jpeg' }] : []
+    });
+
+    navigator.mediaSession.setActionHandler('seekforward', (details)=>{
+      const sec = (details && details.seekOffset) || 10;
+      handleSkip(Math.round(sec / 10) || 1);
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (details)=>{
+      const sec = (details && details.seekOffset) || 10;
+      handleSkip(-(Math.round(sec / 10) || 1));
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', ()=>{ handleSkip(1); });
+    navigator.mediaSession.setActionHandler('previoustrack', ()=>{ handleSkip(-1); });
+    navigator.mediaSession.setActionHandler('play', ()=>{
+      if(video && video.paused){ video.play().catch(()=>{}); isActivelyPlaying = true; showHud('▶ Play'); }
+    });
+    navigator.mediaSession.setActionHandler('pause', ()=>{
+      if(video && !video.paused){ video.pause(); isActivelyPlaying = false; showHud('⏸ Pause'); }
+    });
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (details)=>{
+        if(video && details.seekTime !== undefined && !isNaN(details.seekTime)){
+          video.currentTime = details.seekTime;
+          if(isActivelyPlaying) video.play().catch(()=>{});
+        }
+      });
+    } catch(_){}
+  } catch(e){
+    console.debug('MediaSession registration error:', e);
+  }
+}
 
 /* Toggle English Subtitles */
 function toggleCC(){
@@ -4085,7 +4197,7 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       statusEl.innerHTML = `<span style="color:#ff9359">⚠️ Stream resolution is taking longer than usual.</span>`;
       if(retryWrap) retryWrap.style.display = 'block';
     }
-  }, 35000);
+  }, 45000);
 
   try {
     let epQuery = '';
@@ -4098,6 +4210,7 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
     });
     clearTimeout(slowNoticeTimer);
     clearTimeout(timeoutId);
+    if(retryWrap) retryWrap.style.display = 'none';
 
     if(mySeq !== currentResolveSeq) return;
 
@@ -4168,18 +4281,8 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       if(cc) cc.style.display = 'inline-flex';
       statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min) ${s.cached ? '(cached)' : ''}`;
 
-      // Preemptively refresh token before upstream expiry (e.g. 2 minutes before 30m or 60m token expires)
+      // Playback continues uninterrupted; reactive recovery in Hls.Events.ERROR handles token renewals if needed
       clearTimeout(tokenRefreshTimer);
-      const ttlSec = s.expires_in || 1800;
-      if(ttlSec > 300){
-        const refreshMs = (ttlSec - 120) * 1000;
-        tokenRefreshTimer = setTimeout(() => {
-          if(video && !video.paused && curId && !refreshing){
-            console.log('Preemptively renewing token before expiry...');
-            selfHeal();
-          }
-        }, refreshMs);
-      }
 
       attach(playUrl, kind);
     }
@@ -4221,6 +4324,7 @@ async function selfHeal(){
 
 function attach(url, kind='hls'){
   if(url && url.startsWith('/') && API_BASE) url = API_BASE + url;
+  try { setupMediaSession(); } catch(_){}
 
   if(keepTime > 1 && targetSeekTime <= 0){
     targetSeekTime = keepTime;
@@ -4245,7 +4349,10 @@ function attach(url, kind='hls'){
 
   if(hls){ hls.destroy(); hls = null; }
 
+  const startPos = (targetSeekTime > 3) ? targetSeekTime : ((keepTime > 3) ? keepTime : -1);
+
   hls = new Hls({
+    startPosition: startPos > 0 ? startPos : -1,
     maxBufferLength: 30,
     maxMaxBufferLength: 60,
     backBufferLength: 30,
@@ -4265,7 +4372,6 @@ function attach(url, kind='hls'){
     if(keepTime > 1 && targetSeekTime <= 0){
       targetSeekTime = keepTime;
     }
-    keepTime = 0;
     tryApplySeek();
     video.play().catch(()=>{});
   });
@@ -4428,17 +4534,42 @@ function triggerFsActivity(){
   }, 4000);
 }
 
+function isPlayerInFullscreen(){
+  return !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement ||
+    (video && video.webkitDisplayingFullscreen) ||
+    (playerContainer && (playerContainer.classList.contains('is-fullscreen') || playerContainer.classList.contains('fullscreen'))) ||
+    (window.innerHeight > 0 && Math.abs(window.innerHeight - screen.height) <= 30) ||
+    (window.innerWidth > 0 && Math.abs(window.innerWidth - screen.width) <= 30)
+  );
+}
+
 function togglePlayerFullscreen(){
-  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  const isFs = isPlayerInFullscreen();
   if(isFs){
+    if(video && video.webkitDisplayingFullscreen && typeof video.webkitExitFullscreen === 'function'){
+      video.webkitExitFullscreen();
+    }
     const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
     if(ex) ex.call(document).catch(()=>{});
+    if(playerContainer) playerContainer.classList.remove('is-fullscreen');
   } else {
-    // Request fullscreen on playerContainer so all overlays (Next Episode, HUD, Top Bar) are rendered in fullscreen
+    if(playerContainer) playerContainer.classList.add('is-fullscreen');
     const target = playerContainer || pIframe || video;
     const req = target.requestFullscreen || target.webkitRequestFullscreen || target.mozRequestFullScreen || target.msRequestFullscreen;
     if(req){
-      req.call(target).catch(()=>showHud('Fullscreen is unavailable on this browser'));
+      req.call(target).catch(()=>{
+        if(video && typeof video.webkitEnterFullscreen === 'function'){
+          video.webkitEnterFullscreen();
+        } else {
+          showHud('Fullscreen is unavailable on this browser');
+        }
+      });
+    } else if(video && typeof video.webkitEnterFullscreen === 'function'){
+      video.webkitEnterFullscreen();
     }
   }
 }
@@ -4538,8 +4669,7 @@ function updateFullscreenBtn(){
 window.addEventListener('mousemove', triggerFsActivity);
 window.addEventListener('touchstart', triggerFsActivity, { passive: true });
 
-/* Pre-empt expiry every 25 min (TTL is 30) */
-setInterval(()=>{ if(curId && overlay.classList.contains('on')) selfHeal(); }, 25*60*1000);
+/* Active playback streams rely on reactive error recovery (HTTP 401/403/410 in Hls.Events.ERROR) */
 
 /* Keyboard and Remote Controls */
 window.addEventListener('keydown', (e)=>{
@@ -4574,47 +4704,99 @@ window.addEventListener('keydown', (e)=>{
   const isPlayerOpen = overlay.classList.contains('on');
   if(!isPlayerOpen) return;
 
-  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  const isFs = isPlayerInFullscreen();
+  const key = e.key || '';
+  const code = e.code || '';
+  const keyCode = e.keyCode || e.which || 0;
 
-  // Dedicated remote media control keys always work
-  if(e.key === 'MediaFastForward' || e.key === 'MediaTrackNext'){
+  // TV Remote Skip Forward / Fast Forward / Next Track keys (Supports Android TV, Fire TV, Tizen, webOS, W3C)
+  const isSkipForwardKey = (
+    key === 'MediaFastForward' || key === 'FastFwd' ||
+    key === 'MediaTrackNext' || key === 'TrackNext' ||
+    key === 'MediaSkipForward' || key === 'MediaStepForward' ||
+    code === 'MediaFastForward' || code === 'MediaTrackNext' ||
+    keyCode === 228 || keyCode === 417 || keyCode === 90 ||
+    keyCode === 272 || keyCode === 274 || keyCode === 176 ||
+    keyCode === 10233 || keyCode === 425
+  );
+
+  // TV Remote Skip Backward / Rewind / Previous Track keys (Supports Android TV, Fire TV, Tizen, webOS, W3C)
+  const isSkipBackwardKey = (
+    key === 'MediaRewind' || key === 'Rewind' ||
+    key === 'MediaTrackPrevious' || key === 'TrackPrevious' ||
+    key === 'MediaSkipBackward' || key === 'MediaStepBackward' ||
+    code === 'MediaRewind' || code === 'MediaTrackPrevious' ||
+    keyCode === 227 || keyCode === 412 || keyCode === 89 ||
+    keyCode === 273 || keyCode === 275 || keyCode === 177 ||
+    keyCode === 10232 || keyCode === 424
+  );
+
+  // TV Remote Play / Pause / Toggle keys
+  const isPlayPauseKey = (
+    key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause' ||
+    code === 'MediaPlayPause' ||
+    keyCode === 179 || keyCode === 10252 || keyCode === 415 ||
+    keyCode === 19 || keyCode === 85 || keyCode === 126 || keyCode === 127
+  );
+
+  if(isSkipForwardKey){
     e.preventDefault();
+    e.stopPropagation();
     handleSkip(1);
     return;
   }
-  if(e.key === 'MediaRewind' || e.key === 'MediaTrackPrevious'){
+  if(isSkipBackwardKey){
     e.preventDefault();
+    e.stopPropagation();
     handleSkip(-1);
     return;
   }
-  if(e.key === 'MediaPlayPause'){
+  if(isPlayPauseKey){
     e.preventDefault();
-    if(video.paused){ video.play().catch(()=>{}); showHud('▶ Play'); }
-    else { video.pause(); showHud('⏸ Pause'); }
+    e.stopPropagation();
+    if(key === 'MediaPause' || keyCode === 19 || keyCode === 127){
+      video.pause();
+      isActivelyPlaying = false;
+      showHud('⏸ Pause');
+    } else if(key === 'MediaPlay' || keyCode === 415 || keyCode === 126){
+      video.play().catch(()=>{});
+      isActivelyPlaying = true;
+      showHud('▶ Play');
+    } else {
+      if(video.paused){
+        video.play().catch(()=>{});
+        isActivelyPlaying = true;
+        showHud('▶ Play');
+      } else {
+        video.pause();
+        isActivelyPlaying = false;
+        showHud('⏸ Pause');
+      }
+    }
     return;
   }
 
   // Keyboard shortcut 'f' / 'F' -> Toggle Fullscreen
-  if(e.key === 'f' || e.key === 'F'){
+  if(key === 'f' || key === 'F'){
     e.preventDefault();
     togglePlayerFullscreen();
     return;
   }
   // 'm' / 'M' -> Toggle Mute
-  if(e.key === 'm' || e.key === 'M'){
+  if(key === 'm' || key === 'M'){
     e.preventDefault();
     video.muted = !video.muted;
     showHud(video.muted ? '🔇 Muted' : '🔊 Unmuted');
     return;
   }
   // 'c' / 'C' -> Toggle Subtitles
-  if(e.key === 'c' || e.key === 'C'){
+  if(key === 'c' || key === 'C'){
     e.preventDefault();
     toggleCC();
     return;
   }
   // 'n' / 'N' -> Next Episode
-  if(e.key === 'n' || e.key === 'N'){
+  if(key === 'n' || key === 'N'){
     if(getNextEpisode()){
       e.preventDefault();
       playNextEpisode();
@@ -4622,32 +4804,57 @@ window.addEventListener('keydown', (e)=>{
     return;
   }
 
-  // --- FULLSCREEN MODE: Arrow keys skip and adjust volume ---
+  const isLeftArrow = key === 'ArrowLeft' || code === 'ArrowLeft' || keyCode === 37;
+  const isRightArrow = key === 'ArrowRight' || code === 'ArrowRight' || keyCode === 39;
+  const isUpArrow = key === 'ArrowUp' || code === 'ArrowUp' || keyCode === 38;
+  const isDownArrow = key === 'ArrowDown' || code === 'ArrowDown' || keyCode === 40;
+
+  // --- FULLSCREEN MODE: Arrow keys skip 10s and adjust volume ---
   if(isFs){
-    if(e.key === 'ArrowRight' || e.code === 'ArrowRight' || e.keyCode === 39){
+    if(isRightArrow){
       e.preventDefault();
+      e.stopPropagation();
       handleSkip(1);
-    } else if(e.key === 'ArrowLeft' || e.code === 'ArrowLeft' || e.keyCode === 37){
+      return;
+    }
+    if(isLeftArrow){
       e.preventDefault();
+      e.stopPropagation();
       handleSkip(-1);
-    } else if(e.key === 'ArrowUp' || e.keyCode === 38){
+      return;
+    }
+    if(isUpArrow){
       e.preventDefault();
+      e.stopPropagation();
       video.volume = Math.min(1, Math.round((video.volume + 0.1) * 10) / 10);
       showHud(`🔊 Volume ${Math.round(video.volume * 100)}%`);
-    } else if(e.key === 'ArrowDown' || e.keyCode === 40){
+      return;
+    }
+    if(isDownArrow){
       e.preventDefault();
+      e.stopPropagation();
       video.volume = Math.max(0, Math.round((video.volume - 0.1) * 10) / 10);
       showHud(`🔉 Volume ${Math.round(video.volume * 100)}%`);
-    } else if(e.key === ' ' || e.code === 'Space' || e.key === 'k' || e.key === 'K' || e.keyCode === 32){
+      return;
+    }
+    if(key === ' ' || code === 'Space' || key === 'k' || key === 'K' || keyCode === 32){
       e.preventDefault();
-      if(video.paused){ video.play().catch(()=>{}); showHud('▶ Play'); }
-      else { video.pause(); showHud('⏸ Pause'); }
+      e.stopPropagation();
+      if(video.paused){
+        video.play().catch(()=>{});
+        isActivelyPlaying = true;
+        showHud('▶ Play');
+      } else {
+        video.pause();
+        isActivelyPlaying = false;
+        showHud('⏸ Pause');
+      }
+      return;
     }
     return;
   }
 
   // --- WINDOWED MODAL MODE: Full TV Remote D-Pad Navigation & Smooth Modal Scrolling ---
-  const key = e.key;
   const isDown = key === 'ArrowDown' || e.keyCode === 40;
   const isUp = key === 'ArrowUp' || e.keyCode === 38;
   const isLeft = key === 'ArrowLeft' || e.keyCode === 37;

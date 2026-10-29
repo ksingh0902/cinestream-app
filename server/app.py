@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from config import DB_PATH, STREAM_TTL, UA
+from config import DB_PATH, STREAM_TTL, UA, SITE_MIRRORS
 from scraper.extract import parse_detail, EMBED_RE
 from scraper.http import HttpClient, headers_for
 from scraper.resolve import StreamResolver
@@ -296,7 +296,8 @@ def stats():
 def health():
     """R9: is upstream alive, how many streams are warm."""
     try:
-        _http.get("https://yomovies.wine/", force=True)
+        upstream_test = (SITE_MIRRORS[0] if SITE_MIRRORS else "https://prmovies.ventures") + "/"
+        _http.get(upstream_test, force=True)
         site = "ok"
     except Exception as e:
         site = f"fail: {e}"

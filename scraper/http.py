@@ -78,7 +78,6 @@ class HttpClient:
                             break
                     args = [
                         "--disable-blink-features=AutomationControlled",
-                        "--window-position=-2400,-2400",
                         "--window-size=1280,800"
                     ]
                     self._browser = self._playwright.chromium.launch(
@@ -89,15 +88,15 @@ class HttpClient:
                     self._page.on("popup", lambda p: p.close())
 
                 try:
-                    self._page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                    self._page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 except Exception:
                     pass
-                for _ in range(20):
+                for _ in range(25):
                     try:
                         title = self._page.title()
-                        if "Just a moment" not in title and title.strip():
+                        if "Just a moment" not in title and "Loading" not in title and title.strip():
                             try:
-                                self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+                                self._page.wait_for_selector(".ml-item, #content-embed, .mvic-desc, #footer, footer", timeout=4000)
                             except Exception:
                                 pass
                             content = self._page.content()
@@ -143,13 +142,14 @@ class HttpClient:
                 return ""
 
     def get(self, url: str, *, referer: Optional[str] = None,
-            force: bool = False) -> str:
+            force: bool = False, timeout: Optional[int] = None) -> str:
         cf = self._cache(url)
         if self.use_cache and cf and cf.exists() and not force:
             cached_text = cf.read_text(encoding="utf-8", errors="ignore")
             if "Just a moment..." not in cached_text and len(cached_text) > 1000:
                 return cached_text
 
+        req_timeout = timeout or self.timeout
         gap = time.time() - self._last
         if gap < self.delay:
             time.sleep(self.delay - gap)
@@ -158,7 +158,7 @@ class HttpClient:
         # Try fast requests first if cookies are established
         if self.s.cookies:
             try:
-                r = self.s.get(url, headers=headers_for(url, referer), timeout=self.timeout)
+                r = self.s.get(url, headers=headers_for(url, referer), timeout=req_timeout)
                 if r.status_code == 200 and "Just a moment" not in r.text:
                     r.encoding = r.apparent_encoding or "utf-8"
                     text = r.text
@@ -166,11 +166,14 @@ class HttpClient:
                 text = None
 
         if text is None:
-            if "yomovies.wine" in url:
+            if any(dom in url for dom in (
+                "yomovies.", "yomovies.wine", "yomovies.exchange", "yomovies.com.im",
+                "prmovies.", "prmovies.ventures", "prmovies.mba", "prmovies.technology"
+            )):
                 text = self._browser_get(url)
             else:
                 try:
-                    r = self.s.get(url, headers=headers_for(url, referer), timeout=self.timeout)
+                    r = self.s.get(url, headers=headers_for(url, referer), timeout=req_timeout)
                     if r.status_code == 403:
                         raise requests.HTTPError(response=r)
                     r.raise_for_status()

@@ -31,16 +31,16 @@ class StreamResolver:
             candidates.append(default_candidate)
 
         referers = [
-            "https://yomovies.exchange/",
+            "https://prmovies.ventures/",
+            "https://yomovies.com.im/",
             "https://speedostream1.com/",
-            "https://yomovies.wine/",
         ]
         for url in candidates:
             if not url:
                 continue
             for ref in referers:
                 try:
-                    html = self.http.get(url, referer=ref, force=True)
+                    html = self.http.get(url, referer=ref, force=True, timeout=5)
                     data = parse_embed(html)
                 except Exception:
                     data = None
