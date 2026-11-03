@@ -25,6 +25,7 @@ html {
   overflow-x: hidden;
   overflow-y: auto;
   scroll-behavior: smooth;
+  overflow-anchor: none;
 }
 *, *:before, *:after {
   box-sizing: inherit;
@@ -3246,7 +3247,8 @@ setInterval(checkAuthSession, 60000);
 
 /* Clicking CineMyMovies title goes to Home page 1, Newly Added */
 function goHome(){
-  closePlayer();
+  homeScrollY = 0;
+  closePlayer(false, false);
   closeDropdown();
   page = 1;
   activeGenre = '';
@@ -3261,14 +3263,14 @@ function goHome(){
   document.getElementById('sort').value = 'recent';
   document.getElementById('kind').value = '';
   syncFilterPills('', '', '');
-  window.scrollTo({top: 0, behavior: 'smooth'});
+  window.scrollTo(0, 0);
   load();
 }
 
 let activeSource = '';
 
 function handleGenreFilterChange(val){
-  closePlayer();
+  closePlayer(false, false);
   page = 1;
   const kindVal = document.getElementById('kind').value;
   if(!val){
@@ -3288,14 +3290,14 @@ function handleGenreFilterChange(val){
     activeSource = '';
     syncFilterPills(kindVal, activeGenre, '');
   }
-  window.scrollTo({top: 0, behavior: 'instant'});
+  window.scrollTo(0, 0);
   load();
 }
 window.handleGenreFilterChange = handleGenreFilterChange;
 
 /* Quick Filter Pills (All, Hindi Dubbed, Punjabi, Hollywood, Bollywood, Animation, Series, Movies) */
 function setQuickFilter(kindVal, genreVal, sourceVal = ''){
-  closePlayer();
+  closePlayer(false, false);
   document.getElementById('kind').value = kindVal;
   activeGenre = genreVal;
   activeSource = sourceVal;
@@ -3315,7 +3317,7 @@ function setQuickFilter(kindVal, genreVal, sourceVal = ''){
   if(sf) sf.value = sourceVal;
   page = 1;
   syncFilterPills(kindVal, genreVal, sourceVal);
-  window.scrollTo({top: 0, behavior: 'instant'});
+  window.scrollTo(0, 0);
   load();
 }
 
@@ -4409,7 +4411,8 @@ function attach(url, kind='hls'){
   });
 }
 
-function closePlayer(triggerHistoryBack = true){
+function closePlayer(triggerHistoryBack = true, restoreScroll = true){
+  const wasPlayerOpen = !!((overlay && overlay.classList.contains('on')) || document.body.classList.contains('watch-page'));
   dismissNextEpisodeToast(false);
   nextEpPromptKey = '';
   dismissedNextEpPromptKey = '';
@@ -4474,7 +4477,9 @@ function closePlayer(triggerHistoryBack = true){
   curId = null;
   statusEl.innerHTML = '';
   if(retryWrap) retryWrap.style.display = 'none';
-  setTimeout(()=>window.scrollTo({top: homeScrollY, behavior:'auto'}), 0);
+  if(wasPlayerOpen && restoreScroll && homeScrollY > 0){
+    setTimeout(()=>window.scrollTo({top: homeScrollY, behavior:'auto'}), 0);
+  }
 }
 
 // History popstate: TV remote hardware "Back" button closes player cleanly without exiting website
