@@ -7,6 +7,7 @@ import re
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,14 +23,14 @@ _filter_cache_lock = threading.Lock()
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Ultra-fast, read-optimized SQLite connection with 30s busy timeout and WAL mode."""
+    """Open the catalogue read-only so web traffic can never lock a sync job."""
     target_path = os.getenv("DB_PATH") or ("yomovies.db" if os.path.exists("yomovies.db") else "cinemymovies.sqlite3")
-    conn = sqlite3.connect(target_path, timeout=30, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout = 30000")
+    db_uri = Path(target_path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(db_uri, uri=True, timeout=5, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA query_only=ON")
-    conn.execute("PRAGMA cache_size = -64000")
-    conn.execute("PRAGMA mmap_size = 268435456")
+    # Keep per-worker SQLite memory modest on the 1 GB Oracle instance.
+    conn.execute("PRAGMA cache_size = -8192")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -348,6 +349,8 @@ def movies(
     page: int = 1,
     per_page: int = 48,
 ):
+    page = max(1, int(page))
+    per_page = min(48, max(1, int(per_page)))
     filter_key = (
         source or "",
         (q or "").strip().lower(),
@@ -355,6 +358,8 @@ def movies(
         year or "",
         series,
         sort,
+        page,
+        per_page,
     )
     now = time.monotonic()
 
@@ -362,15 +367,7 @@ def movies(
     with _filter_cache_lock:
         cached = _filter_cache.get(filter_key)
         if cached and (now - cached[0] < _FILTER_CACHE_TTL_SECONDS):
-            items_list = cached[1]
-            total = len(items_list)
-            offset = (page - 1) * per_page
-            return {
-                "total": total,
-                "page": page,
-                "per_page": per_page,
-                "items": items_list[offset:offset + per_page],
-            }
+            return cached[1]
 
     where = ["title IS NOT NULL AND title != ''"]
     args = []
@@ -443,8 +440,17 @@ def movies(
         """
         query_args = args
 
+    # Do not materialise a 30k+ row result just to render the first page.  The
+    # extra room preserves source/edition grouping while keeping VM work bounded.
+    candidate_limit = min(1000, max(192, page * per_page * 8))
+    query_sql += " LIMIT ?"
+    query_args = list(query_args) + [candidate_limit]
+
     with get_db_connection() as conn:
         raw_rows = conn.execute(query_sql, query_args).fetchall()
+        raw_total = conn.execute(
+            f"SELECT COUNT(*) FROM movies WHERE {where_clause}", args
+        ).fetchone()[0]
         if source:
             if source == "movies7":
                 formatted = [
@@ -463,20 +469,24 @@ def movies(
                 formatted.append(_format_row(d))
             items_list = _group_ordered_editions(formatted)
 
+    offset = (page - 1) * per_page
+    result = {
+        # The count is before source/edition de-duplication; clients should use
+        # has_more for infinite scrolling.
+        "total": raw_total,
+        "page": page,
+        "per_page": per_page,
+        "items": items_list[offset:offset + per_page],
+        "has_more": len(items_list) > offset + per_page,
+    }
+
     with _filter_cache_lock:
         if len(_filter_cache) >= _FILTER_CACHE_MAX_ENTRIES:
             oldest_key = min(_filter_cache, key=lambda k: _filter_cache[k][0])
             _filter_cache.pop(oldest_key, None)
-        _filter_cache[filter_key] = (now, items_list)
+        _filter_cache[filter_key] = (now, result)
 
-    total = len(items_list)
-    offset = (page - 1) * per_page
-    return {
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "items": items_list[offset:offset + per_page],
-    }
+    return result
 
 
 @router.get("/api/movie/{movie_id}")
@@ -593,15 +603,9 @@ def series_seasons(movie_id: int):
             db_episodes[(s_num, e_num)] = dict(sib)
 
     if not tmdb_id:
+        # Production catalogue storage is read-only. A later laptop sync can
+        # persist this enrichment; serving a season must never lock the DB.
         tmdb_id = _lookup_tmdb_tv_id(clean_name, str(row["year"] or ""))
-        if tmdb_id:
-            try:
-                target_path = "cinemymovies.sqlite3" if os.path.exists("cinemymovies.sqlite3") else "yomovies.db"
-                with sqlite3.connect(target_path, timeout=10) as write_conn:
-                    write_conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
-                    write_conn.commit()
-            except Exception:
-                pass
 
     seasons = []
 

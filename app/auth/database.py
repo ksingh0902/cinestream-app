@@ -68,8 +68,8 @@ class PostgresCursor:
 
 @contextmanager
 def connect():
-    if config.IS_PRODUCTION and (not config.AUTH_DATABASE_URL or not config._raw_secret):
-        raise sqlite3.OperationalError("Production requires AUTH_DATABASE_URL and SESSION_SECRET")
+    if config.IS_PRODUCTION and not config._raw_secret:
+        raise sqlite3.OperationalError("Production requires SESSION_SECRET")
     if config.AUTH_DATABASE_URL:
         import psycopg
         from psycopg.rows import dict_row

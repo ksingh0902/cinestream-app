@@ -1,12 +1,14 @@
 """Backend: catalogue + self-healing stream resolver + CORS-proof HLS proxy."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import re
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote, unquote, urljoin
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -77,7 +79,9 @@ async def shutdown_sync_scheduler():
 
 @app.post("/api/sync/latest")
 async def trigger_sync():
-    """Manual or cron trigger to immediately sync latest movies from Yomovies & Ask4movie."""
+    """Development-only manual sync; production imports run outside the API VM."""
+    if os.getenv("ENVIRONMENT", "").lower() == "production" or os.getenv("DISABLE_AUTO_SYNC", "0") == "1":
+        raise HTTPException(409, "Catalogue sync is disabled in the production API container")
     from app.sync import run_full_sync
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, run_full_sync)
@@ -294,23 +298,55 @@ def stats():
 
 @app.get("/api/health")
 def health():
-    """R9: is upstream alive, how many streams are warm."""
+    """Fast liveness/readiness probe; it must never call a streaming provider."""
     try:
-        upstream_test = (SITE_MIRRORS[0] if SITE_MIRRORS else "https://prmovies.ventures") + "/"
-        _http.get(upstream_test, force=True)
-        site = "ok"
-    except Exception as e:
-        site = f"fail: {e}"
-    return {"site": site, "cached_streams": stats()["cached_streams"],
-            "ttl_seconds": STREAM_TTL, "time": int(time.time())}
+        from app.api.routes_catalog import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("SELECT 1 FROM movies LIMIT 1").fetchone()
+    except Exception as exc:
+        raise HTTPException(503, "catalogue database unavailable") from exc
+    return {"ok": True, "catalogue": "ready", "time": int(time.time())}
 
 
 
 
-# ------------------------------------------------------------------- proxy
+# ------------------------------------------------------------------- HLS playlist rewriting / local-development proxy
+
+_SEGMENT_SECRET = os.getenv("HLS_SEGMENT_SIGNING_SECRET", "").strip()
+_SEGMENT_TTL_SECONDS = max(30, int(os.getenv("HLS_SEGMENT_TTL_SECONDS", "300")))
+_SEGMENT_ALLOWED_HOSTS = {
+    host.strip().lower() for host in os.getenv("HLS_PROXY_ALLOWED_HOSTS", "").split(",") if host.strip()
+}
+
+
+def _segment_is_allowed(url: str) -> bool:
+    """Do not turn the Nginx relay into a general-purpose internet proxy."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not host:
+        return False
+    return not _SEGMENT_ALLOWED_HOSTS or any(host == allowed or host.endswith(f".{allowed}") for allowed in _SEGMENT_ALLOWED_HOSTS)
+
+
+def _signed_segment_url(url: str) -> str:
+    """Create an Nginx secure_link-compatible, short-lived segment URL."""
+    if not _SEGMENT_SECRET:
+        return "/proxy/seg?u=" + quote(url, safe="")
+    if not _segment_is_allowed(url):
+        raise HTTPException(502, "HLS upstream host is not allow-listed")
+    parsed = urlparse(url)
+    target_host = parsed.netloc
+    path_and_query = parsed.path.lstrip('/') + (f'?{parsed.query}' if parsed.query else '')
+    raw_path = f'{target_host}/{path_and_query}'
+    expires = str(int(time.time()) + _SEGMENT_TTL_SECONDS)
+    digest = hashlib.md5(f'{expires}{raw_path} {_SEGMENT_SECRET}'.encode('utf-8'), usedforsecurity=False).digest()
+    token = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+    return f'/seg/{token}/{expires}/{raw_path}'
+
+
 @app.api_route("/proxy/hls", methods=["GET", "HEAD"])
 async def proxy_hls(u: str = Query(...)):
-    """Rewrite master + media playlists so hls.js is never CORS-blocked (R4)."""
+    """Fetch only playlists and route segment bytes to Nginx in production."""
     url = unquote(u)
     try:
         r = await _client.get(url, headers=headers_for(url), timeout=12)
@@ -338,9 +374,9 @@ async def proxy_hls(u: str = Query(...)):
         for line in text.splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
-                out.append("/proxy/seg?u=" + quote(absu(s), safe=""))
+                out.append(_signed_segment_url(absu(s)))
             elif s.startswith("#EXT-X-KEY") and "URI=" in s:
-                sub_fn = lambda m: f'URI="/proxy/seg?u={quote(absu(m.group(1)), safe="")}"'
+                sub_fn = lambda m: f'URI="{_signed_segment_url(absu(m.group(1)))}"'
                 out.append(re.sub(r'URI="([^"]+)"', sub_fn, s))
             else:
                 out.append(line)
@@ -351,7 +387,9 @@ async def proxy_hls(u: str = Query(...)):
 
 @app.api_route("/proxy/seg", methods=["GET", "HEAD"])
 async def proxy_seg(u: str = Query(...), request: Request = None):
-    """Stream segment/key bytes, forwarding Range so seeking works (R4)."""
+    """Local fallback only; production Nginx owns /seg byte relay."""
+    if _SEGMENT_SECRET:
+        raise HTTPException(404, "Production segment relay is served by Nginx")
     url = unquote(u)
     hdrs = headers_for(url)
     rng = request.headers.get("range") if request else None

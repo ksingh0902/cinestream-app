@@ -36,6 +36,13 @@ CREATE INDEX IF NOT EXISTS idx_movies_title  ON movies(title);
 
 def connect(path: str | None = None) -> sqlite3.Connection:
     target_path = path or CFG.db_path
+    if os.getenv("CATALOG_READ_ONLY", "0") == "1":
+        from pathlib import Path
+        db_uri = Path(target_path).resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(db_uri, uri=True, timeout=5)
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA query_only = ON")
+        return conn
     conn = sqlite3.connect(target_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     from app.db.migrate import migrate_database

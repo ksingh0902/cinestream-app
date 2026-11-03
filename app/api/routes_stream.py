@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -11,11 +12,25 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..adapters import registry
 from ..adapters.ask4movie.config import CFG
-from ..adapters.ask4movie.sync import connect
+from ..adapters.ask4movie.sync import connect as writable_connect
 from ..adapters.embed_helper import enrich_stream_servers
 from ..adapters.movies7 import resolver as movies7_resolver
+from .routes_catalog import get_db_connection
 
 router = APIRouter()
+
+
+def _persist_catalog_update(sql: str, params: tuple) -> None:
+    """Best-effort development cache only; production catalogue is immutable."""
+    if os.getenv("CATALOG_READ_ONLY", "0") == "1":
+        return
+    try:
+        with writable_connect() as conn:
+            conn.execute(sql, params)
+            conn.commit()
+    except sqlite3.OperationalError:
+        # A failed convenience cache write must never prevent playback.
+        return
 
 
 def _lookup_tmdb_id(title: str, year: str | None = None, is_series: bool = False) -> str | None:
@@ -142,7 +157,7 @@ def stream(
     has_ep_params = (target_season is not None) or (target_episode is not None)
     force_refresh = bool(refresh or fresh)
 
-    with connect() as conn:
+    with get_db_connection() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM movies WHERE id = ?", (movie_id,)).fetchone()
 
@@ -159,9 +174,7 @@ def stream(
         if not tmdb_id:
             tmdb_id = _lookup_tmdb_id(row["title"], row["year"], is_series=True)
             if tmdb_id:
-                with connect() as conn:
-                    conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
-                    conn.commit()
+                _persist_catalog_update("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
         if source == "movies7":
             s_num = target_season or 1
             e_num = target_episode or 1
@@ -174,12 +187,10 @@ def stream(
                     episode=e_num,
                 )
                 now = int(time.time())
-                with connect() as conn:
-                    conn.execute(
-                        "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
-                        (info.url, info.kind, json.dumps(info.servers), now, movie_id),
-                    )
-                    conn.commit()
+                _persist_catalog_update(
+                    "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
+                    (info.url, info.kind, json.dumps(info.servers), now, movie_id),
+                )
                 return {
                     "kind": info.kind,
                     "url": info.url,
@@ -297,7 +308,7 @@ def stream(
 
         if not sid.startswith("tt"):
             m_id = re.search(r"(\d+)$", sid)
-            with connect() as conn:
+            with get_db_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 if m_id:
                     ym_id = int(m_id.group(1))
@@ -316,12 +327,10 @@ def stream(
                 info = ym_adapter.resolve_stream(ym_detail)
                 if info and info.url:
                     now = int(time.time())
-                    with connect() as conn:
-                        conn.execute(
-                            "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
-                            (info.url, info.kind, json.dumps(info.servers), now, movie_id),
-                        )
-                        conn.commit()
+                    _persist_catalog_update(
+                        "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
+                        (info.url, info.kind, json.dumps(info.servers), now, movie_id),
+                    )
                     return {
                         "kind": info.kind,
                         "url": info.url,
@@ -339,28 +348,24 @@ def stream(
         if not tmdb_id and sid.startswith("tt"):
             tmdb_id = _find_tmdb_by_imdb(sid)
             if tmdb_id:
-                with connect() as conn:
-                    conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
-                    conn.commit()
+                _persist_catalog_update("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
 
         if not tmdb_id:
             tmdb_id = _lookup_dooflix_tmdb_id(row["title"], row["year"], doo_is_series)
             if tmdb_id:
-                with connect() as conn:
-                    conn.execute("UPDATE movies SET tmdb_id=?, is_series=? WHERE id=?", (tmdb_id, int(doo_is_series), movie_id))
-                    conn.commit()
+                _persist_catalog_update(
+                    "UPDATE movies SET tmdb_id=?, is_series=? WHERE id=?", (tmdb_id, int(doo_is_series), movie_id)
+                )
 
         if tmdb_id:
             dummy_url = _dooflix_embed_url(str(tmdb_id), row["title"], doo_is_series)
             main_url, servers = enrich_stream_servers(dummy_url, is_series=doo_is_series, tmdb_id=str(tmdb_id))
             main_url, servers = _prioritize_dooflix_servers(servers)
             now = int(time.time())
-            with connect() as conn:
-                conn.execute(
-                    "UPDATE movies SET player_url=?, player_kind='iframe', servers_json=?, resolved_at=? WHERE id=?",
-                    (main_url, json.dumps(servers), now, movie_id),
-                )
-                conn.commit()
+            _persist_catalog_update(
+                "UPDATE movies SET player_url=?, player_kind='iframe', servers_json=?, resolved_at=? WHERE id=?",
+                (main_url, json.dumps(servers), now, movie_id),
+            )
             return {
                 "kind": "iframe",
                 "url": main_url,
@@ -383,9 +388,7 @@ def stream(
     if not tmdb_id and (source == "ask4movie" or row["player_kind"] == "iframe"):
         tmdb_id = _lookup_tmdb_id(row["title"], row["year"], bool(row["is_series"]))
         if tmdb_id:
-            with connect() as conn:
-                conn.execute("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
-                conn.commit()
+            _persist_catalog_update("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
 
     if not detail_url and not tmdb_id:
         raise HTTPException(502, "no detail url available for stream resolution")
@@ -439,12 +442,10 @@ def stream(
             if source == "dooflix":
                 main_url, servers = _prioritize_dooflix_servers(servers)
             now = int(time.time())
-            with connect() as conn:
-                conn.execute(
-                    "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
-                    (main_url, "iframe", json.dumps(servers), now, movie_id),
-                )
-                conn.commit()
+            _persist_catalog_update(
+                "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
+                (main_url, "iframe", json.dumps(servers), now, movie_id),
+            )
             return {
                 "kind": "iframe",
                 "url": main_url,
@@ -497,12 +498,10 @@ def stream(
             info.url, info.servers = _prioritize_dooflix_servers(info.servers)
 
     now = int(time.time())
-    with connect() as conn:
-        conn.execute(
-            "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
-            (info.url, info.kind, json.dumps(info.servers), now, movie_id),
-        )
-        conn.commit()
+    _persist_catalog_update(
+        "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
+        (info.url, info.kind, json.dumps(info.servers), now, movie_id),
+    )
 
     return {
         "kind": info.kind,

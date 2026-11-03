@@ -36,6 +36,8 @@ scratch/*
 !scratch/test_auth_state.py
 !scratch/verify_neon_login.py
 _debug/
+nginx/*.conf
+!nginx/*.template
 
 
 

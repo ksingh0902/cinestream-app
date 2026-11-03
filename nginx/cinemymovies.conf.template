@@ -1,0 +1,130 @@
+# Install this as /etc/nginx/conf.d/cinemymovies.conf after replacing only
+# ${HLS_SEGMENT_SIGNING_SECRET} with the value in the VM's .env file:
+#   set -a; . /home/ubuntu/cinestream-app/.env; set +a
+#   envsubst '$HLS_SEGMENT_SIGNING_SECRET' < nginx/cinemymovies.conf.template | sudo tee /etc/nginx/conf.d/cinemymovies.conf
+# The quoted envsubst variable is intentional: all normal Nginx variables stay intact.
+
+upstream cinemymovies_api {
+    server 127.0.0.1:8000;
+    keepalive 16;
+}
+
+# This list must mirror HLS_PROXY_ALLOWED_HOSTS in .env.  Do not weaken this
+# check: proxy_pass with arbitrary URLs would create an open proxy/SSRF risk.
+map $arg_u $hls_allowed {
+    default 0;
+    ~^https?://([a-z0-9-]+\.)?(ydc1wes\.me|vsyshost\.com|watchkar\.com)(/|$) 1;
+}
+
+map $target_host $hls_host_allowed {
+    default 0;
+    ~^([a-z0-9-]+\.)*(ydc1wes\.me|vsyshost\.com|watchkar\.com)$ 1;
+}
+
+map $arg_u $hls_referer {
+    default "";
+    ~^https?://(?<hls_host>[^/]+)/ "https://$hls_host/";
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    access_log /var/log/nginx/cinemymovies-api.access.log;
+    error_log  /var/log/nginx/cinemymovies-api.error.log warn;
+
+    # Catalogue, authentication, stream resolution, and playlist rewriting.
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://cinemymovies_api;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # Query-based legacy segment relay
+    location = /seg {
+        access_log /var/log/nginx/cinemymovies-seg.access.log;
+        error_log  /var/log/nginx/cinemymovies-seg.error.log warn;
+
+        secure_link $arg_md5,$arg_e;
+        secure_link_md5 "$secure_link_expires$arg_u ${HLS_SEGMENT_SIGNING_SECRET}";
+        if ($secure_link = "") { return 403; }
+        if ($secure_link = "0") { return 410; }
+        if ($hls_allowed = 0) { return 403; }
+
+        resolver 1.1.1.1 1.0.0.1 8.8.8.8 valid=300s;
+        resolver_timeout 5s;
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Referer $hls_referer;
+        proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 45s;
+        proxy_send_timeout 45s;
+
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Range, DNT, User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type" always;
+        add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
+
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+
+        proxy_pass $arg_u;
+    }
+
+    # High-performance path-based segment offload (handles any query params cleanly)
+    location ~ ^/seg/(?<token>[^/]+)/(?<expires>[0-9]+)/(?<target_host>[^/]+)/(?<target_path>.*)$ {
+        access_log /var/log/nginx/cinemymovies-seg.access.log;
+        error_log  /var/log/nginx/cinemymovies-seg.error.log warn;
+
+        secure_link $token,$expires;
+        secure_link_md5 "$secure_link_expires$target_host/$target_path$is_args$args ${HLS_SEGMENT_SIGNING_SECRET}";
+        if ($secure_link = "") { return 403; }
+        if ($secure_link = "0") { return 410; }
+        if ($hls_host_allowed = 0) { return 403; }
+
+        resolver 1.1.1.1 1.0.0.1 8.8.8.8 valid=300s;
+        resolver_timeout 5s;
+
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Host $target_host;
+        proxy_set_header Referer "https://$target_host/";
+        proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 45s;
+        proxy_send_timeout 45s;
+
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Range, DNT, User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type" always;
+        add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
+
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+
+        proxy_pass https://$target_host/$target_path$is_args$args;
+    }
+}

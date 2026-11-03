@@ -29,7 +29,12 @@ docker run -d \
   --name cinemymovies \
   --restart unless-stopped \
   --env-file /home/ubuntu/cinestream-app/.env \
-  -e DB_PATH=yomovies.db \
+  -e ENVIRONMENT=production \
+  -e DISABLE_AUTO_SYNC=1 \
+  -e ENABLE_AUTO_SYNC=0 \
+  -e CATALOG_READ_ONLY=1 \
+  -e DB_PATH=/app/yomovies.db \
+  -v /home/ubuntu/cinestream-app/yomovies.db:/app/yomovies.db:ro \
   -p 127.0.0.1:8000:8000 \
   cinemymovies
 ```
@@ -69,3 +74,33 @@ Copy the validated database to a temporary path, then atomically replace the liv
 while the container is stopped. Restart only the application container using the
 normal redeploy commands above. `DISABLE_AUTO_SYNC=1` is set for production so the
 web process cannot start a background crawl.
+
+## HLS relay: Nginx, not Python
+
+The API container must never carry HLS segment bytes.  Set a long random
+`HLS_SEGMENT_SIGNING_SECRET` plus a tested `HLS_PROXY_ALLOWED_HOSTS` list in the
+VM-only `.env`. Then render and test the checked-in Nginx template:
+
+```bash
+cd ~/cinestream-app
+set -a; . ./.env; set +a
+envsubst '$HLS_SEGMENT_SIGNING_SECRET' < nginx/cinemymovies.conf.template | \
+  sudo tee /etc/nginx/conf.d/cinemymovies.conf >/dev/null
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The host list in `nginx/cinemymovies.conf.template` must match the `.env`
+allow-list before enabling it. Test a resolved provider segment from the VM
+first; a `403` or timeout means that provider cannot be safely relayed from the
+Oracle data-centre and should not be added to the list.
+
+## Catalogue imports are laptop-only
+
+Run `python sync_latest.py` on the laptop, validate the new database with
+`PRAGMA integrity_check`, copy it to `yomovies.new.db` on the VM, then atomically
+replace the live file. The production container reads the mounted DB only:
+
+```bash
+mv yomovies.new.db yomovies.db
+docker restart cinemymovies
+```

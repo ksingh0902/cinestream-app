@@ -26,4 +26,4 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 
 # hosts that need a player-page Referer to avoid 403 (R5)
-STREAM_HOST_HINTS = ("speedostream", "ydc1wes", "ydc1", "ygsmn", "vsyshost")
+STREAM_HOST_HINTS = ("speedostream", "ydc1wes", "ydc1", "ygsmn", "vsyshost", "watchkar")
