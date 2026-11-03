@@ -1956,34 +1956,6 @@ body.player-is-fullscreen {
   opacity: 0 !important;
   pointer-events: none !important;
 }
-.player-fullscreen-toggle {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 100000;
-  min-width: 44px;
-  height: 40px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid rgba(255,255,255,.55);
-  border-radius: 8px;
-  background: rgba(10,12,17,.72);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0,0,0,.45);
-}
-.player-fullscreen-toggle:hover,
-.player-fullscreen-toggle:focus-visible { background: rgba(234,88,12,.9); outline: 2px solid #fff; }
-.player-container.fs-idle .player-fullscreen-toggle { opacity: 0; pointer-events: none; }
-#player-container:fullscreen .player-fullscreen-toggle,
-#player-container:-webkit-full-screen .player-fullscreen-toggle { display: none; }
-video::-webkit-media-controls-fullscreen-button { display: none !important; }
 
 /* Resume & Next Episode Overlays */
 .resume-banner, .next-ep-banner {
@@ -2543,8 +2515,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
         <span>⏭️</span>
         <span id="fs-floating-next-text">Next Episode</span>
       </button>
-      <video id="v" controls playsinline controlslist="nofullscreen noremoteplayback" crossorigin="anonymous"></video>
-      <button id="player-fullscreen-toggle" class="player-fullscreen-toggle" onclick="togglePlayerFullscreen()" title="Fullscreen (Press F)" aria-label="Fullscreen"><svg class="fs-control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><span class="player-fs-label">Fullscreen</span></button>
+      <video id="v" controls playsinline controlslist="noremoteplayback" crossorigin="anonymous"></video>
       <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true" referrerpolicy="no-referrer"></iframe>
       <div id="player-hud"></div>
       <div id="resume-banner" class="resume-banner" style="display:none;">
@@ -4569,7 +4540,6 @@ function triggerFsActivity(){
         fsTopBar.style.setProperty('transform', 'translateY(-8px)', 'important');
         fsTopBar.style.setProperty('pointer-events', 'none', 'important');
       }
-      if(video && video.style.display !== 'none') video.controls = false;
     }
   }, 4000);
 }
@@ -4611,7 +4581,8 @@ function togglePlayerFullscreen(){
     }
     document.body.classList.add('player-is-fullscreen');
 
-    const target = playerContainer || video;
+    const activeEl = (pIframe && pIframe.style.display !== 'none') ? pIframe : (video && video.style.display !== 'none' ? video : playerContainer);
+    const target = activeEl || playerContainer;
     const req = target.requestFullscreen || target.webkitRequestFullscreen || target.mozRequestFullScreen || target.msRequestFullscreen;
     if(req){
       Promise.resolve(req.call(target)).catch(()=>{
@@ -4644,18 +4615,6 @@ function handleFsStateChange(){
   const next = getNextEpisode();
 
   if(isFs){
-    // Native video/iframe controls fullscreen only that media element. Promote it to
-    // the complete player container so HUD, Next Episode and TV controls stay visible.
-    if(fsElement !== playerContainer && (fsElement === video || fsElement === pIframe) && playerContainer && !fsPromotionPending){
-      const promote = playerContainer.requestFullscreen || playerContainer.webkitRequestFullscreen || playerContainer.mozRequestFullScreen || playerContainer.msRequestFullscreen;
-      if(promote){
-        fsPromotionPending = true;
-        Promise.resolve(promote.call(playerContainer))
-          .catch(()=>{})
-          .finally(()=>{ fsPromotionPending = false; });
-        return;
-      }
-    }
 
     if(fsTopBar){
       fsTopBar.style.display = 'flex';
