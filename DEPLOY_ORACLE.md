@@ -35,6 +35,7 @@ docker run -d \
   -e CATALOG_READ_ONLY=1 \
   -e DB_PATH=/app/yomovies.db \
   -v /home/ubuntu/cinestream-app/yomovies.db:/app/yomovies.db:ro \
+  -v /home/ubuntu/cinestream-app/cinemymovies.sqlite3:/app/cinemymovies.sqlite3:rw \
   -p 127.0.0.1:8000:8000 \
   cinemymovies
 ```
