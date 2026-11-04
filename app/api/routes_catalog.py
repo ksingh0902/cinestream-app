@@ -594,13 +594,17 @@ def series_seasons(movie_id: int):
         query = f"SELECT id, title, source, tmdb_id FROM movies WHERE title LIKE ? AND ({ADULT_EXCLUSION_SQL}) ORDER BY id ASC"
         siblings = conn.execute(query, (f"{clean_name}%",)).fetchall()
         for sib in siblings:
-            s_m = re.search(r"\bSeason\s*(\d+)\b", sib["title"] or "", re.I)
-            e_m = re.search(r"\bEpisode\s*(\d+)\b", sib["title"] or "", re.I)
-            s_num = int(s_m.group(1)) if s_m else 1
-            e_num = int(e_m.group(1)) if e_m else 1
             if not tmdb_id and sib["tmdb_id"]:
                 tmdb_id = sib["tmdb_id"]
-            db_episodes[(s_num, e_num)] = dict(sib)
+            s_m = re.search(r"\bSeason\s*(\d+)\b", sib["title"] or "", re.I)
+            e_m = re.search(r"\bEpisode\s*(\d+)\b", sib["title"] or "", re.I)
+            if s_m and e_m:
+                s_num = int(s_m.group(1))
+                e_num = int(e_m.group(1))
+                if (s_num, e_num) not in db_episodes or sib["source"] == row["source"]:
+                    db_episodes[(s_num, e_num)] = dict(sib)
+            elif sib["id"] == movie_id:
+                db_episodes[(1, 1)] = dict(sib)
 
     if not tmdb_id:
         # Production catalogue storage is read-only. A later laptop sync can
