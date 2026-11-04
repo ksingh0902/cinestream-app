@@ -3286,15 +3286,71 @@ function checkAndShowResumeBanner(contentId) {
   }
 }
 
+let pendingIframeSeekTime = 0;
+let iframeSeekRetryTimer = null;
+
+function sendIframeSeek(sec) {
+  if (!pIframe || !pIframe.contentWindow) return;
+  const s = Math.floor(sec);
+  const messages = [
+    { player: true, action: 'seek' + s },
+    { player: true, action: 'play' },
+    { player: true, action: 'seek', time: s, seconds: s },
+    { type: 'seek', time: s, seconds: s },
+    { event: 'seek', time: s, seconds: s },
+    { action: 'seek', time: s, seconds: s },
+    { method: 'setCurrentTime', value: s },
+    { player_action: 'seek', time: s },
+    { type: 'player:seek', time: s },
+    { event: 'command', func: 'seekTo', args: [s, true] }
+  ];
+  for (const msg of messages) {
+    try {
+      pIframe.contentWindow.postMessage(msg, '*');
+      pIframe.contentWindow.postMessage(JSON.stringify(msg), '*');
+    } catch (_) {}
+  }
+}
+
+function startIframeSeekRetry(dest) {
+  if (iframeSeekRetryTimer) {
+    clearInterval(iframeSeekRetryTimer);
+    iframeSeekRetryTimer = null;
+  }
+  pendingIframeSeekTime = dest;
+  sendIframeSeek(dest);
+
+  let attempts = 0;
+  iframeSeekRetryTimer = setInterval(() => {
+    attempts++;
+    if (attempts >= 10 || pendingIframeSeekTime <= 0 || iframeCurrentTime >= pendingIframeSeekTime - 3) {
+      clearInterval(iframeSeekRetryTimer);
+      iframeSeekRetryTimer = null;
+      pendingIframeSeekTime = 0;
+      return;
+    }
+    sendIframeSeek(dest);
+  }, 300);
+}
+
 function confirmResumePlayback() {
   const banner = document.getElementById('resume-banner');
   if (banner) banner.style.display = 'none';
   if (!currentSavedProgress || !currentSavedProgress.currentTime) return;
-  targetSeekTime = currentSavedProgress.currentTime;
-  iframeBaseOffset = targetSeekTime;
-  iframeActiveWatchTime = targetSeekTime;
+  const dest = currentSavedProgress.currentTime;
+  targetSeekTime = dest;
+  iframeBaseOffset = dest;
+  iframeActiveWatchTime = dest;
   iframeWatchStartTimestamp = Date.now();
-  tryApplySeek();
+
+  const isIframe = pIframe && pIframe.style.display !== 'none';
+  if (isIframe) {
+    startIframeSeekRetry(dest);
+    showHud('Resumed from ' + formatTime(dest));
+    targetSeekTime = 0;
+  } else {
+    tryApplySeek();
+  }
 }
 
 function restartPlaybackFromBeginning() {
@@ -3303,8 +3359,14 @@ function restartPlaybackFromBeginning() {
   targetSeekTime = 0;
   iframeBaseOffset = 0;
   iframeActiveWatchTime = 0;
+  iframeCurrentTime = 0;
   iframeWatchStartTimestamp = Date.now();
   currentSavedProgress = null;
+  pendingIframeSeekTime = 0;
+  if (iframeSeekRetryTimer) {
+    clearInterval(iframeSeekRetryTimer);
+    iframeSeekRetryTimer = null;
+  }
   if (activeContentId) {
     const isSeries = activeContentId.startsWith('series_');
     if (isSeries) {
@@ -3321,7 +3383,10 @@ function restartPlaybackFromBeginning() {
     }
     renderContinueWatching();
   }
-  if (video) {
+  const isIframe = pIframe && pIframe.style.display !== 'none';
+  if (isIframe) {
+    sendIframeSeek(0);
+  } else if (video) {
     try {
       video.currentTime = 0;
       video.play().catch(()=>{});
@@ -3336,7 +3401,17 @@ function dismissResumePrompt() {
 }
 
 function tryApplySeek() {
-  if (targetSeekTime <= 0 || !video) return;
+  if (targetSeekTime <= 0) return;
+  const isIframe = pIframe && pIframe.style.display !== 'none';
+  if (isIframe) {
+    const dest = targetSeekTime;
+    startIframeSeekRetry(dest);
+    showHud('Resumed from ' + formatTime(dest));
+    targetSeekTime = 0;
+    return;
+  }
+
+  if (!video) return;
   const hasDuration = video.duration && !isNaN(video.duration) && video.duration > 0;
   const hasSeekable = (video.seekable && video.seekable.length > 0) || video.readyState >= 1;
 
@@ -3345,7 +3420,7 @@ function tryApplySeek() {
       const dest = Math.min(targetSeekTime, Math.max(0, video.duration - 2));
       video.currentTime = dest;
       lastKnownPlayTime = dest;
-      showHud(`Resumed from ${formatTime(dest)}`);
+      showHud('Resumed from ' + formatTime(dest));
       targetSeekTime = 0;
       keepTime = 0;
       video.play().catch(()=>{});
@@ -4087,10 +4162,9 @@ function setIframeSrc(url){
     activeIframeSessionId = 0;
   }
   try {
+    pIframe.src = url;
     if(pIframe.contentWindow && pIframe.contentWindow.location){
       pIframe.contentWindow.location.replace(url);
-    } else {
-      pIframe.src = url;
     }
   } catch(_) {
     pIframe.src = url;
@@ -4123,6 +4197,27 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   const initItem = window.movieCache?.get(id) || {};
   const sInfo = extractSeriesInfo(initItem.title, initItem);
   const canonInitId = sInfo.seriesId || getCanonicalSeriesId(initItem, id, null);
+
+  // If opening series without explicit targetSeason/targetEpisode, restore active episode from Continue Watching
+  if (targetSeason == null && targetEpisode == null) {
+    const allCw = StorageManager.getAll();
+    const seriesEps = allCw.filter(it => {
+      const isSer = !!(it.is_series || (it.contentId && it.contentId.startsWith('series_')));
+      if (!isSer) return false;
+      const sMatch = it.contentId ? it.contentId.match(/^series_(.+)_s\d+_e\d+$/) : null;
+      const sId = String(it.series_id || (sMatch ? sMatch[1] : null) || it.id || '');
+      return sId === String(canonInitId) || sId === String(id) || String(it.id) === String(id);
+    });
+    if (seriesEps.length > 0) {
+      seriesEps.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const activeSavedEp = seriesEps.find(ep => !ep.isCompleted) || seriesEps[0];
+      if (activeSavedEp && activeSavedEp.season != null && activeSavedEp.episode != null) {
+        targetSeason = activeSavedEp.season;
+        targetEpisode = activeSavedEp.episode;
+      }
+    }
+  }
+
   if(targetSeason != null && targetEpisode != null){
     activeSeasonNum = targetSeason;
     activeEpisodeNum = targetEpisode;
@@ -4230,9 +4325,14 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
       : '';
     const hasYearInTitle = item.title && /\(\s*\d{4}\s*\)/.test(item.title);
     const yr = (item.year && !hasYearInTitle) ? ` (${esc(item.year)})` : '';
-    document.getElementById('p-title').innerHTML = `${srcTag} ${dubTag} ${esc(item.title || ('Movie #' + id))}${yr}`;
+    const cleanBase = (item.title || ('Movie #' + id)).replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
+    const isSeries = !!(sInfo.isSeries || metaInfo.isSeries || (activeSeasonNum != null && activeEpisodeNum != null));
+    const epSuffix = (isSeries && activeSeasonNum != null && activeEpisodeNum != null)
+      ? ` · S${String(activeSeasonNum).padStart(2, '0')} E${String(activeEpisodeNum).padStart(2, '0')}`
+      : '';
+    document.getElementById('p-title').innerHTML = `${srcTag} ${dubTag} ${esc(cleanBase)}${epSuffix}${yr}`;
     const fsTitle = document.getElementById('fs-show-title');
-    if(fsTitle) fsTitle.textContent = item.title || '';
+    if(fsTitle) fsTitle.textContent = `${cleanBase}${epSuffix}`;
     document.getElementById('p-syn').textContent = item.synopsis || '';
     const metaBits = [];
     if(item.rating) metaBits.push(`Rating ${esc(item.rating)}`);
@@ -4284,7 +4384,9 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   // Load Seasons & Episodes hierarchy asynchronously
   loadSeriesSeasons(id);
 
-  await fetchStream(id);
+  const fetchS = (activeSeasonNum != null) ? activeSeasonNum : targetSeason;
+  const fetchE = (activeEpisodeNum != null) ? activeEpisodeNum : targetEpisode;
+  await fetchStream(id, false, fetchS, fetchE);
 }
 
 let currentSeriesData = null;
@@ -4338,6 +4440,20 @@ async function loadSeriesSeasons(id){
     if (currentSavedProgress && currentSavedProgress.currentTime) {
       iframeBaseOffset = currentSavedProgress.currentTime;
       iframeActiveWatchTime = iframeBaseOffset;
+    }
+    const baseTitle = data.title || (window.movieCache?.get(curId)?.title) || '';
+    const cleanBase = baseTitle.replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
+    const epPad = String(activeEpisodeNum).padStart(2, '0');
+    const sPad = String(activeSeasonNum).padStart(2, '0');
+    const pTitleEl = document.getElementById('p-title');
+    if(pTitleEl){
+      const curBadge = pTitleEl.querySelector('span[style*="background"]');
+      const badgeHtml = curBadge ? curBadge.outerHTML + ' ' : '';
+      pTitleEl.innerHTML = `${badgeHtml}${esc(cleanBase)} · S${sPad} E${epPad}`;
+    }
+    const fsTitle = document.getElementById('fs-show-title');
+    if(fsTitle){
+      fsTitle.textContent = `${cleanBase} · S${sPad} E${epPad}`;
     }
     renderSeasonsUI();
     checkAndTriggerNextEp();
@@ -4541,6 +4657,11 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       if(pIframe){
         pIframe.style.display = 'block';
         setIframeSrc(playUrl);
+        if (targetSeekTime > 0) {
+          startIframeSeekRetry(targetSeekTime);
+          showHud('Resumed from ' + formatTime(targetSeekTime));
+          targetSeekTime = 0;
+        }
       }
       startIframeWatchTracker();
       checkAndTriggerNextEp();
@@ -4563,6 +4684,10 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
           btn.style.cssText = 'padding:4px 12px;font-size:12px;cursor:pointer;';
           btn.onclick = () => {
             setIframeSrc(srv.url);
+            const curWatchTime = (iframeActiveWatchTime > 3) ? iframeActiveWatchTime : (iframeCurrentTime > 3 ? iframeCurrentTime : 0);
+            if (curWatchTime > 0) {
+              startIframeSeekRetry(curWatchTime);
+            }
             srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))}${tagEp} · Active stream player`;
@@ -4605,7 +4730,7 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
 }
 
 function retryStream(){
-  if(curId) fetchStream(curId, true);
+  if(curId) fetchStream(curId, true, activeSeasonNum, activeEpisodeNum);
 }
 
 /* Silently renew token on fatal error or upstream token expiration */
@@ -4625,7 +4750,7 @@ async function selfHeal(){
     lastKnownPlayTime = resumeAt;
   }
   statusEl.innerHTML = `<span class="spinner"></span> Token refreshed — resuming playback${resumeAt > 0 ? ' at ' + formatTime(resumeAt) : ''}…`;
-  await fetchStream(curId, true);
+  await fetchStream(curId, true, activeSeasonNum, activeEpisodeNum);
   setTimeout(()=>{ refreshing = false; }, 2000);
 }
 
@@ -5509,6 +5634,18 @@ window.addEventListener('message', (event) => {
     }
 
     // Only accept timestamps from real content (duration >= 300s), ignore ad frames
+    if (pendingIframeSeekTime > 0) {
+      if (hasValidCurTime && curTime >= pendingIframeSeekTime - 3) {
+        pendingIframeSeekTime = 0;
+        if (iframeSeekRetryTimer) {
+          clearInterval(iframeSeekRetryTimer);
+          iframeSeekRetryTimer = null;
+        }
+      } else {
+        sendIframeSeek(pendingIframeSeekTime);
+      }
+    }
+
     if (hasValidDuration) {
       iframeDuration = totalDuration;
       iframeHasVerifiedDuration = true;

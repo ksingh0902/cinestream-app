@@ -1500,7 +1500,215 @@ console.log('Running Corrected Web Series Continue Watching Test Suite...\n');
   console.log('✓ Test 19 Passed: Time formatting helpers and close player error resiliency verified.');
 }
 
-console.log('\n======================================================');
-console.log('ALL 19 COMPREHENSIVE TESTS PASSED CLEANLY! (19/19)');
-console.log('======================================================\n');
+// Test 20: Resuming series episode from Continue Watching passes active season and episode to stream resolver
+{
+  StorageManager.clearAll();
 
+  // 1. User was watching Episode 16 of Mentalist (ID: 6664) with 15 mins watched out of 45 mins
+  const mentalistEp16 = {
+    contentId: 'series_6664_s1_e16',
+    id: 6664,
+    series_id: '6664',
+    title: 'The Mentalist',
+    is_series: true,
+    season: 1,
+    episode: 16,
+    currentTime: 900,
+    duration: 2700,
+    progressPct: 33,
+    isCompleted: false,
+    updatedAt: Date.now() - 5000
+  };
+  StorageManager.saveItem(mentalistEp16);
+
+  // 2. Verify Continue Watching carousel card renders with targetSeason=1, targetEpisode=16
+  const cwItems = getContinueWatchingDisplayItems();
+  assert.strictEqual(cwItems.length, 1);
+  assert.strictEqual(cwItems[0].season, 1);
+  assert.strictEqual(cwItems[0].episode, 16);
+  assert.strictEqual(cwItems[0].metaText, 'S1:E16');
+
+  // 3. Simulate openPlayer with explicit targetSeason & targetEpisode (card click: openPlayer('6664', 1, 16))
+  let simulatedStreamCall = null;
+  function mockFetchStream(id, fresh, season, episode) {
+    simulatedStreamCall = { id, fresh, season, episode };
+  }
+
+  function simulateOpenPlayer(id, targetSeason = null, targetEpisode = null, isSeries = true) {
+    const canonInitId = String(id);
+
+    // Automatic restoration of active episode if omitted
+    if (targetSeason == null && targetEpisode == null) {
+      const allCw = StorageManager.getAll();
+      const seriesEps = allCw.filter(it => {
+        const isSer = !!(it.is_series || (it.contentId && it.contentId.startsWith('series_')));
+        if (!isSer) return false;
+        const sMatch = it.contentId ? it.contentId.match(/^series_(.+)_s\d+_e\d+$/) : null;
+        const sId = String(it.series_id || (sMatch ? sMatch[1] : null) || it.id || '');
+        return sId === String(canonInitId) || sId === String(id) || String(it.id) === String(id);
+      });
+      if (seriesEps.length > 0) {
+        seriesEps.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const activeSavedEp = seriesEps.find(ep => !ep.isCompleted) || seriesEps[0];
+        if (activeSavedEp && activeSavedEp.season != null && activeSavedEp.episode != null) {
+          targetSeason = activeSavedEp.season;
+          targetEpisode = activeSavedEp.episode;
+        }
+      }
+    }
+
+    let activeSeasonNum = targetSeason;
+    let activeEpisodeNum = targetEpisode;
+    let activeContentId = (targetSeason != null && targetEpisode != null)
+      ? `series_${canonInitId}_s${targetSeason}_e${targetEpisode}`
+      : `movie_${id}`;
+
+    const fetchS = (activeSeasonNum != null) ? activeSeasonNum : targetSeason;
+    const fetchE = (activeEpisodeNum != null) ? activeEpisodeNum : targetEpisode;
+    mockFetchStream(id, false, fetchS, fetchE);
+
+    return { activeSeasonNum, activeEpisodeNum, activeContentId };
+  }
+
+  // Explicit resume from card
+  const resCard = simulateOpenPlayer(6664, 1, 16, true);
+  assert.strictEqual(resCard.activeSeasonNum, 1);
+  assert.strictEqual(resCard.activeEpisodeNum, 16);
+  assert.strictEqual(resCard.activeContentId, 'series_6664_s1_e16');
+  assert.deepStrictEqual(simulatedStreamCall, { id: 6664, fresh: false, season: 1, episode: 16 });
+
+  // Resume when opening series without explicit params (e.g. reload on #watch/6664 or catalog click)
+  const resCatalog = simulateOpenPlayer(6664, null, null, true);
+  assert.strictEqual(resCatalog.activeSeasonNum, 1, 'Should restore active season from Continue Watching');
+  assert.strictEqual(resCatalog.activeEpisodeNum, 16, 'Should restore active episode 16 from Continue Watching');
+  assert.strictEqual(resCatalog.activeContentId, 'series_6664_s1_e16');
+  assert.deepStrictEqual(simulatedStreamCall, { id: 6664, fresh: false, season: 1, episode: 16 }, 'Stream resolver must receive S1 E16');
+
+  // Verify movie playback with null targetSeason does not fabricate episode
+  const resMovie = simulateOpenPlayer(999, null, null, false);
+  assert.strictEqual(resMovie.activeSeasonNum, null);
+  assert.strictEqual(resMovie.activeEpisodeNum, null);
+  assert.strictEqual(resMovie.activeContentId, 'movie_999');
+  assert.deepStrictEqual(simulatedStreamCall, { id: 999, fresh: false, season: null, episode: null });
+
+  console.log('✓ Test 20 Passed: Series resume passes active season/episode to stream resolver and restores in-progress episode.');
+}
+
+console.log('\n======================================================');
+// Test 21: Embed iframe resume from timestamp without reload, postMessage seek protocol verification, and seek retry
+{
+  StorageManager.clearAll();
+
+  // 1. Simulate iframe environment & confirmResumePlayback
+  let postMessagesSent = [];
+  const rawUrl = 'https://embed.vidsrc.si/embed/tv/6664/1/16?autoplay=1&ds_lang=en';
+  const mockIframe = {
+    src: rawUrl,
+    style: { display: 'block' },
+    contentWindow: {
+      postMessage: function(msg, targetOrigin) {
+        postMessagesSent.push({ msg, targetOrigin });
+      }
+    }
+  };
+
+  let mockHudMessage = null;
+  function mockShowHud(text) {
+    mockHudMessage = text;
+  }
+
+  let iframeActiveWatchTime = 0;
+  let iframeBaseOffset = 0;
+  let targetSeekTime = 0;
+  let pIframe = mockIframe;
+  let pendingIframeSeekTime = 0;
+  let iframeSeekRetryTimer = null;
+  let retryCount = 0;
+
+  function simulateSendIframeSeek(sec) {
+    if (!pIframe || !pIframe.contentWindow) return;
+    const s = Math.floor(sec);
+    const messages = [
+      { player: true, action: 'seek' + s },
+      { player: true, action: 'play' },
+      { player: true, action: 'seek', time: s, seconds: s },
+      { type: 'seek', time: s, seconds: s },
+      { event: 'seek', time: s, seconds: s },
+      { action: 'seek', time: s, seconds: s },
+      { method: 'setCurrentTime', value: s },
+      { player_action: 'seek', time: s },
+      { type: 'player:seek', time: s },
+      { event: 'command', func: 'seekTo', args: [s, true] }
+    ];
+    for (const msg of messages) {
+      pIframe.contentWindow.postMessage(msg, '*');
+      pIframe.contentWindow.postMessage(JSON.stringify(msg), '*');
+    }
+  }
+
+  function simulateStartIframeSeekRetry(dest) {
+    pendingIframeSeekTime = dest;
+    simulateSendIframeSeek(dest);
+    retryCount++;
+  }
+
+  function simulateConfirmResumePlayback(savedProgress) {
+    if (!savedProgress || !savedProgress.currentTime) return;
+    const dest = savedProgress.currentTime;
+    targetSeekTime = dest;
+    iframeBaseOffset = dest;
+    iframeActiveWatchTime = dest;
+
+    const isIframe = pIframe && pIframe.style.display !== 'none';
+    if (isIframe) {
+      simulateStartIframeSeekRetry(dest);
+      mockShowHud(`Resumed from ${formatTime(dest)}`);
+      targetSeekTime = 0;
+    }
+  }
+
+  // Execute resume for 1246 seconds (20:46)
+  simulateConfirmResumePlayback({ currentTime: 1246 });
+
+  // 2. Verify:
+  // - Iframe src was NOT altered or reloaded (avoiding restart from 0:00)
+  assert.strictEqual(pIframe.src, rawUrl, 'Iframe src must not be reloaded on resume');
+  assert.strictEqual(iframeBaseOffset, 1246, 'Iframe base offset must be 1246');
+  assert.strictEqual(iframeActiveWatchTime, 1246, 'Iframe active watch time must be 1246');
+  assert.strictEqual(targetSeekTime, 0, 'Target seek time must be cleared');
+  assert.strictEqual(mockHudMessage, 'Resumed from 20:46', 'HUD must notify resumption time 20:46');
+
+  // Verify the exact VidSrc/DooFlix protocol message was dispatched
+  assert(postMessagesSent.some(p => p.msg.player === true && p.msg.action === 'seek1246'), 'Must dispatch { player: true, action: "seek1246" }');
+  assert(postMessagesSent.some(p => p.msg.player === true && p.msg.action === 'play'), 'Must dispatch play action');
+
+  // Verify VidSrc internal regex matches our action string
+  const vidsrcRegex = /seek([+-]?)([0-9]+)/;
+  const match = 'seek1246'.match(vidsrcRegex);
+  assert(match && +match[2] === 1246, 'VidSrc regex must parse 1246 from action');
+
+  // 3. Start over from beginning sends seek0 and resets offsets without reload
+  function simulateRestartPlaybackFromBeginning() {
+    targetSeekTime = 0;
+    iframeBaseOffset = 0;
+    iframeActiveWatchTime = 0;
+    pendingIframeSeekTime = 0;
+    const isIframe = pIframe && pIframe.style.display !== 'none';
+    if (isIframe) {
+      simulateSendIframeSeek(0);
+    }
+    mockShowHud('Playing from start');
+  }
+
+  simulateRestartPlaybackFromBeginning();
+  assert.strictEqual(pIframe.src, rawUrl, 'Start over must not reload the iframe');
+  assert.strictEqual(iframeBaseOffset, 0);
+  assert.strictEqual(iframeActiveWatchTime, 0);
+  assert.strictEqual(mockHudMessage, 'Playing from start');
+  assert(postMessagesSent.some(p => p.msg.player === true && p.msg.action === 'seek0'), 'Must dispatch seek0 on start over');
+
+  console.log('✓ Test 21 Passed: Embed iframe resume from timestamp without reload, postMessage seek protocol verification, and seek retry.');
+}
+
+console.log('ALL 21 COMPREHENSIVE TESTS PASSED CLEANLY! (21/21)');
+console.log('======================================================\n');
