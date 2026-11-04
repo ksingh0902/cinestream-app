@@ -3037,6 +3037,69 @@ function handleEpisodeFinished(seriesId, seasonNum, episodeNum, currentItem, dur
   StorageManager.saveItem(epEntry);
   renderContinueWatching();
 }
+
+function formatTime(sec) {
+  if (isNaN(sec) || sec < 0) return '0:00';
+  sec = Math.floor(sec);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) {
+    return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  }
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function formatRemaining(sec) {
+  if (isNaN(sec) || sec <= 0) return '';
+  sec = Math.floor(sec);
+  const m = Math.round(sec / 60);
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    return remM > 0 ? `${h}h ${remM}m left` : `${h}h left`;
+  }
+  return `${Math.max(1, m)}m left`;
+}
+
+function updateHorizontalRailControls(id) {
+  const rail = document.getElementById(id);
+  if (!rail) return;
+  const isFilter = id === 'filter-bar';
+  const left = document.getElementById(isFilter ? 'filter-left' : 'cw-left');
+  const right = document.getElementById(isFilter ? 'filter-right' : 'cw-right');
+  if (!left || !right) return;
+
+  const hasOverflow = rail.scrollWidth > rail.clientWidth + 4;
+  left.classList.toggle('rail-empty', !hasOverflow);
+  right.classList.toggle('rail-empty', !hasOverflow);
+  left.disabled = !hasOverflow || rail.scrollLeft <= 2;
+  right.disabled = !hasOverflow || rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 2;
+}
+
+function scrollHorizontalRail(id, direction) {
+  const rail = document.getElementById(id);
+  if (!rail) return;
+  const amount = Math.max(220, Math.floor(rail.clientWidth * 0.72));
+  rail.scrollBy({ left: direction * amount, behavior: 'smooth' });
+  setTimeout(() => updateHorizontalRailControls(id), 260);
+}
+
+if (typeof window !== 'undefined') {
+  ['filter-bar', 'cw-carousel'].forEach((id) => {
+    const rail = document.getElementById(id);
+    if (rail) rail.addEventListener('scroll', () => updateHorizontalRailControls(id), { passive: true });
+  });
+  window.addEventListener('resize', () => {
+    updateHorizontalRailControls('filter-bar');
+    updateHorizontalRailControls('cw-carousel');
+  }, { passive: true });
+  requestAnimationFrame(() => {
+    updateHorizontalRailControls('filter-bar');
+    updateHorizontalRailControls('cw-carousel');
+  });
+}
+
 function renderContinueWatching() {
   const section = document.getElementById('cw-section');
   const carousel = document.getElementById('cw-carousel');
@@ -4658,7 +4721,11 @@ function closePlayer(triggerHistoryBack = true, restoreScroll = true){
   if(fsTopBar){ fsTopBar.style.display = 'none'; fsTopBar.classList.remove('fs-visible'); }
   if(playerContainer) playerContainer.classList.remove('fs-idle');
   clearTimeout(fsActivityTimer);
-  savePlaybackProgress(true);
+  try {
+    savePlaybackProgress(true);
+  } catch(e) {
+    console.warn('Failed to save playback progress on close:', e);
+  }
   stopIframeWatchTracker();
   currentSeriesData = null;
   currentPlaybackSessionId = ++playbackSessionCounter;
