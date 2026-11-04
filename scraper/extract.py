@@ -27,7 +27,7 @@ EROTIC_REGEX = re.compile(
     r"fliz(?:movies)?|hunters?\s+(?:originals?|app)|gupchup|gup\s*chup|primeflix|hot\s*masti|masti\s*prime|lootlo\s+(?:originals?|app)|"
     r"big\s*movie\s*zoo|11up(?:movies)?|hot\s*prime|world\s*prime|"
     r"bigshots|big\s+shots|hotx|hotshots|hot\s+shots|cineprime|cine\s+prime|"
-    r"rabbit\s+movies?|rabbit\s+original|voovi|"
+    r"rabbit(?:[\s_-]*movies?|[\s_-]*originals?)?|mirchiapp|9redmovies|showtym(?:[\s_-]*originals?)?|chillx(?:[\s_-]*originals?)?|raangoli(?:[\s_-]*originals?)?|kangan(?:[\s_-]*originals?)?|bull(?:[\s_-]*originals?)?|ratri(?:[\s_-]*originals?)?|kaama|waah(?:[\s_-]*originals?)?|voovi|"
     r"redprime|red\s+prime|feelit|yessma|jalva|huntcinema|mastiplay|bulbulplay|kaddu|"
     r"desiprime|atrangii|jugnutv|tempt(?:\s+originals?|\s+app)?|honeymoon\s+couples|"
     r"hot\s+series|hot\s+web\s*series|softcore|adult\s+series|adult\s+web\s*series|"
