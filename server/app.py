@@ -8,7 +8,7 @@ import re
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -313,7 +313,7 @@ def health():
 # ------------------------------------------------------------------- HLS playlist rewriting / local-development proxy
 
 _SEGMENT_SECRET = os.getenv("HLS_SEGMENT_SIGNING_SECRET", "").strip()
-_SEGMENT_TTL_SECONDS = max(30, int(os.getenv("HLS_SEGMENT_TTL_SECONDS", "300")))
+_SEGMENT_TTL_SECONDS = max(300, int(os.getenv("HLS_SEGMENT_TTL_SECONDS", "21600")))
 _SEGMENT_ALLOWED_HOSTS = {
     host.strip().lower() for host in os.getenv("HLS_PROXY_ALLOWED_HOSTS", "").split(",") if host.strip()
 }
@@ -328,17 +328,88 @@ def _segment_is_allowed(url: str) -> bool:
     return not _SEGMENT_ALLOWED_HOSTS or any(host == allowed or host.endswith(f".{allowed}") for allowed in _SEGMENT_ALLOWED_HOSTS)
 
 
-def _signed_segment_url(url: str) -> str:
-    """Create an Nginx secure_link-compatible, short-lived segment URL."""
+def _evaluate_upstream_expiry(query_str: str, now: int) -> tuple[str, Optional[int], Optional[str]]:
+    """Evaluate upstream token lifetime (s = start epoch, e = duration seconds).
+
+    Distinguishes:
+    1. Both 's' and 'e' absent -> ("absent", None, None)
+    2. Both present and valid -> ("valid", s + e, None)
+    3. Only one present -> ("partial", None, error_detail)
+    4. Duplicated parameters -> ("duplicated", None, error_detail)
+    5. Malformed or out-of-range -> ("malformed", None, error_detail)
+    """
+    if not query_str:
+        return "absent", None, None
+
+    try:
+        qs = parse_qs(query_str, keep_blank_values=False)
+    except Exception:
+        return "malformed", None, "Unable to parse query parameters"
+
+    has_s = "s" in qs
+    has_e = "e" in qs
+
+    if not has_s and not has_e:
+        return "absent", None, None
+
+    if has_s != has_e:
+        missing_param = "e" if has_s else "s"
+        return "partial", None, f"Partial upstream token: missing required parameter '{missing_param}'"
+
+    s_list = qs["s"]
+    e_list = qs["e"]
+
+    if len(s_list) != 1 or len(e_list) != 1:
+        return "duplicated", None, "Conflicting duplicated upstream token parameters"
+
+    try:
+        s_val = int(s_list[0])
+        e_val = int(e_list[0])
+    except (ValueError, TypeError):
+        return "malformed", None, "Non-integer upstream token parameter values"
+
+    # Validate against actual provider semantics:
+    # 's' is a UNIX epoch start timestamp; 'e' is a positive duration in seconds
+    if s_val < 1577836800 or s_val > now + 86400:
+        return "malformed", None, f"Upstream start timestamp '{s_val}' is outside permitted range"
+    if e_val <= 0 or e_val > 86400:
+        return "malformed", None, f"Upstream duration '{e_val}' is outside permitted range"
+
+    return "valid", s_val + e_val, None
+
+
+def _signed_segment_url(url: str, now: Optional[int] = None) -> str:
+    """Create an Nginx secure_link-compatible segment URL.
+    
+    Dynamically bounds expiration to the upstream authorization window (s + e)
+    so local signatures never outlive upstream validity. Fails closed on any
+    partial, duplicate, or malformed token parameters.
+    """
     if not _SEGMENT_SECRET:
         return "/proxy/seg?u=" + quote(url, safe="")
     if not _segment_is_allowed(url):
         raise HTTPException(502, "HLS upstream host is not allow-listed")
+
     parsed = urlparse(url)
     target_host = parsed.netloc
     path_and_query = parsed.path.lstrip('/') + (f'?{parsed.query}' if parsed.query else '')
     raw_path = f'{target_host}/{path_and_query}'
-    expires = str(int(time.time()) + _SEGMENT_TTL_SECONDS)
+
+    current_time = int(time.time()) if now is None else int(now)
+    token_status, upstream_expiry, err_msg = _evaluate_upstream_expiry(parsed.query, current_time)
+
+    if token_status == "valid":
+        local_expiry = min(current_time + _SEGMENT_TTL_SECONDS, upstream_expiry)
+        if local_expiry <= current_time:
+            raise HTTPException(410, "Upstream stream authorization has expired")
+    elif token_status == "absent":
+        # Both absent: use fallback TTL only where appropriate for allowlisted hosts
+        local_expiry = current_time + _SEGMENT_TTL_SECONDS
+    else:
+        # Fail closed on partial, duplicated, or malformed token parameters
+        raise HTTPException(403, f"Upstream token error: {err_msg}")
+
+    expires = str(local_expiry)
     digest = hashlib.md5(f'{expires}{raw_path} {_SEGMENT_SECRET}'.encode('utf-8'), usedforsecurity=False).digest()
     token = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
     return f'/seg/{token}/{expires}/{raw_path}'

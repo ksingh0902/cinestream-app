@@ -2773,6 +2773,16 @@ let currentSavedProgress = null;
 let isAuthenticated = false;
 let lastKnownPlayTime = 0;
 let tokenRefreshTimer = null;
+let iframeCurrentTime = 0;
+let iframeDuration = 0;
+let iframeHasVerifiedDuration = false;
+let iframePlaybackEnded = false;
+let currentIframeOrigin = null;
+let playbackSessionCounter = 0;
+let currentPlaybackSessionId = 0;
+let activeIframeContentId = null;
+let activeIframeSessionId = 0;
+let activeIframeOrigin = null;
 
 const StorageManager = {
   isAvailable() {
@@ -2844,9 +2854,14 @@ const StorageManager = {
 };
 
 function extractSeriesInfo(title, item) {
-  const isSeries = !!(item?.is_series || /season|episode|s\d+\s*e\d+/i.test(title || ''));
-  let season = item?.season ?? item?.season_id ?? null;
-  let episode = item?.episode ?? item?.episode_id ?? null;
+  const isSeries = !!(
+    (activeSeasonNum != null && activeEpisodeNum != null) ||
+    item?.is_series ||
+    (currentSeriesData && currentSeriesData.is_series) ||
+    /season|episode|s\d+\s*e\d+/i.test(title || '')
+  );
+  let season = (activeSeasonNum != null) ? activeSeasonNum : (item?.season ?? item?.season_id ?? null);
+  let episode = (activeEpisodeNum != null) ? activeEpisodeNum : (item?.episode ?? item?.episode_id ?? null);
   if (isSeries) {
     if (season == null) {
       const sMatch = (title || '').match(/season\s*(\d+)/i) || (title || '').match(/s(\d+)\s*e/i);
@@ -2955,10 +2970,14 @@ function renderContinueWatching() {
     const dubBadge = it.is_hindi_dubbed ? '<span class="cw-card-badge" style="background:#059669;color:#fff;">🎙️ Dubbed</span>' : '';
     const srcBadge = it.source === 'ask4movie'
       ? '<span class="cw-card-badge" style="background:#ea580c;color:#fff;">🍿 ask</span>'
-      : '<span class="cw-card-badge" style="background:#1d4ed8;color:#fff;">🎬 ym</span>';
+      : (it.source === 'dooflix'
+        ? '<span class="cw-card-badge" style="background:#dc2626;color:#fff;">📺 doo</span>'
+        : (it.source === 'movies7'
+          ? '<span class="cw-card-badge" style="background:#7c3aed;color:#fff;">🎬 m7</span>'
+          : '<span class="cw-card-badge" style="background:#1d4ed8;color:#fff;">🎬 ym</span>'));
 
     return `
-      <div class="cw-card" tabindex="0" role="button" aria-label="Continue ${esc(it.title)}" onclick="openPlayer(${it.id})">
+      <div class="cw-card" tabindex="0" role="button" aria-label="Continue ${esc(it.title)}" onclick="openPlayer(${it.id}, ${it.season || 'null'}, ${it.episode || 'null'})">
         <button class="cw-btn-remove" onclick="removeCwItem('${esc(it.contentId)}', event)" title="Remove from Continue Watching">&times;</button>
         <div class="cw-poster-wrap">
           <img src="${esc(getCardPosterUrl(it.poster, it.title, it.year, it.source))}" alt="${esc(it.title)}" data-title="${esc(it.title)}" data-year="${esc(it.year||'')}" data-source="${esc(it.source||'')}" loading="lazy" onerror="handleCardImgError(this)">
@@ -3073,17 +3092,48 @@ function tryApplySeek() {
 }
 
 function savePlaybackProgress(force = false) {
-  if (!curId || !activeContentId || !video) return;
-  const currentTime = video.currentTime;
-  const duration = video.duration;
+  if (!curId || !activeContentId) return;
+  const isIframe = pIframe && pIframe.style.display !== 'none';
+  let currentTime = 0;
+  let duration = 0;
+  let isEnded = false;
+  let hasVerifiedDuration = false;
+
+  if (isIframe) {
+    currentTime = iframeCurrentTime;
+    duration = iframeDuration;
+    isEnded = iframePlaybackEnded;
+    hasVerifiedDuration = iframeHasVerifiedDuration;
+    if (!duration || isNaN(duration) || duration <= 0) {
+      const cached = window.movieCache?.get(curId);
+      if (cached && cached.duration_s && cached.duration_s > 0) {
+        duration = cached.duration_s;
+        hasVerifiedDuration = false;
+      }
+    }
+  } else if (video) {
+    currentTime = video.currentTime;
+    duration = video.duration;
+    isEnded = video.ended;
+    hasVerifiedDuration = Number.isFinite(duration) && duration > 0;
+  }
 
   if (isNaN(currentTime) || currentTime < 5) return;
   if (isNaN(duration) || duration <= 0) return;
   // Guard against overwriting saved position if player was just reloaded and currentTime hasn't caught up
   if (targetSeekTime > 10 && currentTime < 10) return;
 
-  // 95% Completion rule: remove from continue watching
-  if (video.ended || (currentTime / duration) >= 0.95) {
+  // 95% Completion policy:
+  // An item is removed from Continue Watching only when:
+  // 1) Duration is verified and >= 300s (protecting against short ad frames and unverified catalogue fallbacks)
+  // 2) Playback has reached at least 95% completion:
+  //    either (currentTime / duration) >= 0.95, or a verified ended event when (currentTime / duration) >= 0.95
+  const isCompleted = hasVerifiedDuration && duration >= 300 && (
+    (currentTime / duration) >= 0.95 ||
+    (isEnded && (currentTime / duration) >= 0.95)
+  );
+
+  if (isCompleted) {
     StorageManager.removeItem(activeContentId);
     renderContinueWatching();
     return;
@@ -3111,6 +3161,7 @@ function savePlaybackProgress(force = false) {
     is_hindi_dubbed: !!currentItem.is_hindi_dubbed,
     currentTime: Math.floor(currentTime),
     duration: Math.floor(duration),
+    hasVerifiedDuration: hasVerifiedDuration,
     progressPct: Math.round((currentTime / duration) * 100),
     updatedAt: Date.now()
   };
@@ -3130,8 +3181,13 @@ video.addEventListener('timeupdate', () => {
   savePlaybackProgress(false);
   updateNextEpisodeBtn();
   if(currentSeriesData && currentSeriesData.is_series && getNextEpisode()){
-    if(isNearEpisodeEnd()) showNextEpisodeToast(false);
-    else if(!nextEpCountdownTimer){
+    if(isNearEpisodeEnd()) {
+      showNextEpisodeToast(false);
+    } else {
+      if(nextEpCountdownTimer){
+        clearInterval(nextEpCountdownTimer);
+        nextEpCountdownTimer = null;
+      }
       const banner = document.getElementById('next-ep-banner');
       if(banner) banner.style.display = 'none';
     }
@@ -3143,6 +3199,17 @@ video.addEventListener('seeked', () => {
     lastKnownPlayTime = video.currentTime;
   }
   savePlaybackProgress(true);
+  updateNextEpisodeBtn();
+  if(currentSeriesData && currentSeriesData.is_series && getNextEpisode()){
+    if(!isNearEpisodeEnd()){
+      if(nextEpCountdownTimer){
+        clearInterval(nextEpCountdownTimer);
+        nextEpCountdownTimer = null;
+      }
+      const banner = document.getElementById('next-ep-banner');
+      if(banner) banner.style.display = 'none';
+    }
+  }
 });
 video.addEventListener('loadedmetadata', tryApplySeek);
 video.addEventListener('canplay', tryApplySeek);
@@ -3549,25 +3616,7 @@ function showHud(text){
 function handleSkip(direction){
   const isIframeActive = pIframe && pIframe.style.display !== 'none';
   if(isIframeActive){
-    const sec = direction * 10;
-    if(direction > 0){
-      if(skipAccumulator < 0) skipAccumulator = 0;
-      skipAccumulator += 10;
-    } else {
-      if(skipAccumulator > 0) skipAccumulator = 0;
-      skipAccumulator -= 10;
-    }
-    const text = skipAccumulator > 0 ? `⏩ +${skipAccumulator}s` : `⏪ ${skipAccumulator}s`;
-    showHud(text);
-    clearTimeout(skipResetTimer);
-    skipResetTimer = setTimeout(()=>{ skipAccumulator = 0; }, 750);
-    try {
-      if(pIframe.contentWindow){
-        pIframe.contentWindow.postMessage({ type: 'seek', offset: sec }, '*');
-        pIframe.contentWindow.postMessage({ event: 'seek', value: sec }, '*');
-        pIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seek', args: [sec] }), '*');
-      }
-    } catch(_){}
+    showHud('Seeking handled via player controls in embed');
     return;
   }
 
@@ -3732,6 +3781,31 @@ function toggleCC(){
 function setIframeSrc(url){
   if(!pIframe) return;
   try {
+    const parsed = new URL(url, window.location.origin);
+    const host = parsed.hostname.toLowerCase();
+    const permittedHosts = [
+      'embed.vidsrc.si', 'vidsrc.si', 'vidsrc.pm', 'vidfast.pro', 'embed.filmu.in',
+      'play2.123embed.net', 'player.videasy.to', 'vidcore.org', 'www.2embed.cc',
+      '2embed.cc', 'vidup.to', 'cinesrc.st', '111movies.net', 'vidlink.pro', 'primesrc.me'
+    ];
+    if (permittedHosts.some(h => host === h || host.endsWith('.' + h))) {
+      currentIframeOrigin = parsed.origin;
+      activeIframeOrigin = parsed.origin;
+      activeIframeContentId = activeContentId;
+      activeIframeSessionId = currentPlaybackSessionId;
+    } else {
+      currentIframeOrigin = null;
+      activeIframeOrigin = null;
+      activeIframeContentId = null;
+      activeIframeSessionId = 0;
+    }
+  } catch(_) {
+    currentIframeOrigin = null;
+    activeIframeOrigin = null;
+    activeIframeContentId = null;
+    activeIframeSessionId = 0;
+  }
+  try {
     if(pIframe.contentWindow && pIframe.contentWindow.location){
       pIframe.contentWindow.location.replace(url);
     } else {
@@ -3742,12 +3816,34 @@ function setIframeSrc(url){
   }
 }
 
-async function openPlayer(id){
+async function openPlayer(id, targetSeason = null, targetEpisode = null){
   const wasWatching = document.body.classList.contains('watch-page');
   if(!wasWatching) homeScrollY = window.scrollY || 0;
   curId = id;
   lastProgressSaveTime = 0;
   targetSeekTime = 0;
+  currentSavedProgress = null;
+  currentPlaybackSessionId = ++playbackSessionCounter;
+  activeIframeContentId = null;
+  activeIframeSessionId = 0;
+  activeIframeOrigin = null;
+  iframeCurrentTime = 0;
+  iframeDuration = 0;
+  iframeHasVerifiedDuration = false;
+  iframePlaybackEnded = false;
+  currentIframeOrigin = null;
+
+  // Reset episode and series state when opening content
+  if(targetSeason != null && targetEpisode != null){
+    activeSeasonNum = targetSeason;
+    activeEpisodeNum = targetEpisode;
+    activeContentId = `series_${id}_s${targetSeason}_e${targetEpisode}`;
+  } else {
+    activeSeasonNum = null;
+    activeEpisodeNum = null;
+    activeContentId = `movie_${id}`;
+  }
+  currentSeriesData = null;
   dismissResumePrompt();
   dismissNextEpisodeToast(false);
   nextEpPromptKey = '';
@@ -3768,7 +3864,9 @@ async function openPlayer(id){
 
   const initItem = window.movieCache?.get(id) || {};
   const sInfo = extractSeriesInfo(initItem.title, initItem);
-  activeContentId = sInfo.contentId || `movie_${id}`;
+  if(activeSeasonNum == null && activeEpisodeNum == null){
+    activeContentId = sInfo.contentId || `movie_${id}`;
+  }
   checkAndShowResumeBanner(activeContentId);
 
   document.documentElement.classList.remove('modal-open');
@@ -3823,7 +3921,9 @@ async function openPlayer(id){
   const renderMeta = (item) => {
     if(!item) return;
     const metaInfo = extractSeriesInfo(item.title, item);
-    activeContentId = metaInfo.contentId || `movie_${id}`;
+    if(activeSeasonNum == null && activeEpisodeNum == null){
+      activeContentId = metaInfo.contentId || `movie_${id}`;
+    }
     checkAndShowResumeBanner(activeContentId);
 
     const isAsk = item.source === 'ask4movie';
@@ -3911,6 +4011,12 @@ function getNextEpisodeKey(next = getNextEpisode()){
 }
 
 function isNearEpisodeEnd(){
+  const isIframe = pIframe && pIframe.style.display !== 'none';
+  if(isIframe){
+    if(!iframeDuration || !Number.isFinite(iframeDuration) || iframeDuration <= 180) return false;
+    const remaining = iframeDuration - iframeCurrentTime;
+    return remaining > 0 && remaining <= 180;
+  }
   if(!video || !Number.isFinite(video.duration) || video.duration <= 0) return false;
   const remaining = video.duration - video.currentTime;
   return remaining > 0 && remaining <= 180;
@@ -3957,23 +4063,23 @@ function updateNextEpisodeBtn(){
   const fsBtn = document.getElementById('fs-btn-next-ep');
   const fsFloatBtn = document.getElementById('fs-floating-next-btn');
   const fsFloatTxt = document.getElementById('fs-floating-next-text');
-  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  const isFs = isPlayerInFullscreen();
 
   const next = getNextEpisode();
   const shouldShow = !!next && isNearEpisodeEnd();
   if(shouldShow){
     if(btn){
-      btn.style.display = 'inline-flex';
+      btn.style.display = isFs ? 'none' : 'inline-flex';
       btn.textContent = `⏭️ Next (${next.label})`;
       btn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
     }
     if(fsBtn){
-      fsBtn.style.display = 'none';
+      fsBtn.style.display = isFs ? 'inline-flex' : 'none';
       fsBtn.textContent = `⏭️ Next (${next.label})`;
       fsBtn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
     }
     if(fsFloatBtn){
-      fsFloatBtn.style.display = 'none';
+      fsFloatBtn.style.display = isFs ? 'flex' : 'none';
       if(fsFloatTxt) fsFloatTxt.textContent = `Next (${next.label})`;
       fsFloatBtn.title = `Play Next Episode: ${next.label}${next.name ? ' · ' + next.name : ''} (Press N)`;
     }
@@ -4060,8 +4166,10 @@ async function loadSeriesSeasons(id){
       return;
     }
     currentSeriesData = data;
-    activeSeasonNum = data.current_season || 1;
-    activeEpisodeNum = data.current_episode || 1;
+    if(activeSeasonNum == null) activeSeasonNum = data.current_season || 1;
+    if(activeEpisodeNum == null) activeEpisodeNum = data.current_episode || 1;
+    activeContentId = `series_${id}_s${activeSeasonNum}_e${activeEpisodeNum}`;
+    checkAndShowResumeBanner(activeContentId);
     renderSeasonsUI();
     updateNextEpisodeBtn();
   } catch(e){
@@ -4152,8 +4260,17 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
   dismissNextEpisodeToast(false);
   nextEpPromptKey = '';
   dismissedNextEpPromptKey = '';
+  currentPlaybackSessionId = ++playbackSessionCounter;
+  activeIframeContentId = null;
+  activeIframeSessionId = 0;
   activeSeasonNum = sNum;
   activeEpisodeNum = eNum;
+  activeContentId = `series_${curId}_s${sNum}_e${eNum}`;
+  lastProgressSaveTime = 0;
+  targetSeekTime = 0;
+  iframeCurrentTime = 0;
+  iframePlaybackEnded = false;
+  checkAndShowResumeBanner(activeContentId);
   renderSeasonsUI();
   updateNextEpisodeBtn();
 
@@ -4176,7 +4293,7 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
   }
 
   if(epMovieId && epMovieId !== curId){
-    openPlayer(epMovieId);
+    openPlayer(epMovieId, sNum, eNum);
   } else {
     statusEl.innerHTML = `<span class="spinner"></span> Playing Season ${sNum} Episode ${eNum}…`;
     await fetchStream(curId, false, sNum, eNum);
@@ -4428,6 +4545,15 @@ function closePlayer(triggerHistoryBack = true, restoreScroll = true){
   clearTimeout(fsActivityTimer);
   currentSeriesData = null;
   savePlaybackProgress(true);
+  currentPlaybackSessionId = ++playbackSessionCounter;
+  activeIframeContentId = null;
+  activeIframeSessionId = 0;
+  activeIframeOrigin = null;
+  iframeCurrentTime = 0;
+  iframeDuration = 0;
+  iframeHasVerifiedDuration = false;
+  iframePlaybackEnded = false;
+  currentIframeOrigin = null;
   dismissResumePrompt();
   targetSeekTime = 0;
   activeContentId = null;
@@ -4638,11 +4764,7 @@ function handleFsStateChange(){
         }
       }
     }
-    if(fsFloatBtn){
-      fsFloatBtn.style.display = 'none';
-    }
-    const fsNextBtn = document.getElementById('fs-btn-next-ep');
-    if(fsNextBtn) fsNextBtn.style.display = 'none';
+    updateNextEpisodeBtn();
     triggerFsActivity();
   } else {
     fsPromotionPending = false;
@@ -4655,9 +4777,7 @@ function handleFsStateChange(){
       fsTopBar.style.removeProperty('transform');
       fsTopBar.style.removeProperty('pointer-events');
     }
-    if(fsFloatBtn){
-      fsFloatBtn.style.display = 'none';
-    }
+    updateNextEpisodeBtn();
     if(video) video.controls = true;
     clearTimeout(fsActivityTimer);
   }
@@ -5154,27 +5274,99 @@ window.addEventListener('keydown', (e)=>{
   }
 }, true);
 
-/* Auto-detect ended event from 3rd-party embed iframes (VidSrc, VidFast, 2Embed, etc.) */
+/* Auto-detect ended event and secure playback progress from permitted embed iframes */
 window.addEventListener('message', (event) => {
   try {
+    // 1. Source verification: Must originate strictly from the active player iframe element
+    if (!pIframe || pIframe.style.display === 'none' || !pIframe.contentWindow || event.source !== pIframe.contentWindow) {
+      return;
+    }
+
+    // 2. Playback session & Content identity verification: Stale messages from old episodes or sessions are discarded
+    if (!activeIframeSessionId || activeIframeSessionId !== currentPlaybackSessionId) {
+      return;
+    }
+    if (!activeIframeContentId || activeIframeContentId !== activeContentId) {
+      return;
+    }
+
+    // 3. Strict origin verification: Must strictly match the active iframe's permitted origin
+    if (!activeIframeOrigin || event.origin !== activeIframeOrigin) {
+      return;
+    }
+
+    // 4. Message structure verification: Must be a valid non-array object
     let data = event.data;
-    if(typeof data === 'string'){
-      try { data = JSON.parse(data); } catch(_) {}
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (_) { return; }
     }
-    if(!data) return;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
 
+    // 5. Timestamps & duration validation (Duration must be >= 300s to filter out ad frames)
+    const rawCurTime = data.currentTime ?? data.data?.currentTime ?? data.value?.seconds ?? data.value?.currentTime;
+    const rawDuration = data.duration ?? data.data?.duration ?? data.value?.duration;
+
+    const curTime = Number(rawCurTime);
+    const totalDuration = Number(rawDuration);
+
+    const hasValidCurTime = Number.isFinite(curTime) && curTime >= 0 && curTime <= 172800;
+    const hasValidDuration = Number.isFinite(totalDuration) && totalDuration >= 300 && totalDuration <= 172800;
+
+    // Reject implausible timestamps
+    if (hasValidCurTime && hasValidDuration && curTime > totalDuration + 5) {
+      return;
+    }
+
+    // Only accept timestamps from real content (duration >= 300s), ignore ad frames
+    if (hasValidDuration) {
+      iframeDuration = totalDuration;
+      iframeHasVerifiedDuration = true;
+      if (hasValidCurTime) {
+        iframeCurrentTime = curTime;
+        lastKnownPlayTime = curTime;
+      }
+    } else if (hasValidCurTime && iframeHasVerifiedDuration) {
+      if (curTime <= iframeDuration + 5) {
+        iframeCurrentTime = curTime;
+        lastKnownPlayTime = curTime;
+      }
+    }
+
+    // 6. Completion safety: NEVER allow premature or ad-related ended events to bypass the 95% threshold
     const evt = (data.event || data.type || data.action || data.status || '').toString().toLowerCase();
-    const isEnded = evt === 'ended' || evt === 'finish' || evt === 'complete' || evt === 'playback_ended' || evt === 'media_ended';
-    const curTime = Number(data.currentTime || (data.data && data.data.currentTime) || 0);
-    const totalDuration = Number(data.duration || (data.data && data.data.duration) || 0);
-    const remaining = totalDuration - curTime;
-    const isNearEnd = totalDuration > 180 && remaining > 0 && remaining <= 180;
+    const isEndedMsg = evt === 'ended' || evt === 'finish' || evt === 'complete' || evt === 'playback_ended';
 
-    if(currentSeriesData && currentSeriesData.is_series && getNextEpisode()){
-      if(isEnded) showNextEpisodeToast(true);
-      else if(isNearEnd) showNextEpisodeToast(false);
+    // A genuine ended event is accepted only when duration is verified (>= 300s)
+    // AND the stream actually reached the 95% completion threshold
+    if (isEndedMsg && iframeDuration >= 300 && (iframeCurrentTime / iframeDuration) >= 0.95) {
+      iframePlaybackEnded = true;
     }
-  } catch(_) {}
+
+    // 7. Save playback progress if verified
+    if (iframeHasVerifiedDuration && iframeCurrentTime >= 5) {
+      savePlaybackProgress(false);
+    }
+
+    // 8. Next Episode triggers for iframes with verified remaining time
+    const remaining = (iframeDuration > 0 && iframeCurrentTime > 0) ? (iframeDuration - iframeCurrentTime) : 0;
+    const isNearEnd = iframeDuration > 180 && remaining > 0 && remaining <= 180;
+
+    if (currentSeriesData && currentSeriesData.is_series && getNextEpisode()) {
+      updateNextEpisodeBtn();
+      if (iframePlaybackEnded) {
+        showNextEpisodeToast(true);
+      } else if (isNearEnd) {
+        showNextEpisodeToast(false);
+      } else {
+        if (nextEpCountdownTimer) {
+          clearInterval(nextEpCountdownTimer);
+          nextEpCountdownTimer = null;
+        }
+        const banner = document.getElementById('next-ep-banner');
+        if (banner) banner.style.display = 'none';
+      }
+    }
+  } catch (_) {}
 });
 
 /* TV Remote D-Pad Navigation & Smooth Scroll System */
