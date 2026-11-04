@@ -29,6 +29,7 @@ from app.adapters.ask4movie import catalog as a4m_catalog
 from app.adapters.ask4movie.http import get as a4m_get
 from app.adapters.ask4movie.sync import upsert as a4m_upsert
 from app.adapters.movies7.sync import sync_movies7
+from app.adapters.dooflix.sync import sync_dooflix
 
 logger = logging.getLogger("cinemymovies.sync")
 
@@ -518,6 +519,7 @@ def run_full_sync() -> Dict[str, Any]:
     ym_res = sync_yomovies(base_time)
     a4m_res = sync_ask4movie(base_time)
     m7_res = sync_movies7(pages_per_category=5)
+    df_res = sync_dooflix(base_time)
 
     duration = round(time.time() - start_time, 2)
     summary = {
@@ -527,8 +529,10 @@ def run_full_sync() -> Dict[str, Any]:
         "yomovies": ym_res,
         "ask4movie": a4m_res,
         "movies7": m7_res,
-        "total_added": ym_res["added"] + a4m_res["added"] + m7_res.get("total", 0),
-        "total_refreshed": ym_res["updated"] + a4m_res["updated"],
+        "dooflix": df_res,
+        "total_added": ym_res.get("added", 0) + a4m_res.get("added", 0) + m7_res.get("added", 0) + df_res.get("added", 0),
+        "total_refreshed": ym_res.get("updated", 0) + a4m_res.get("updated", 0) + m7_res.get("updated", 0) + df_res.get("updated", 0),
+        "total_skipped": ym_res.get("skipped", 0) + a4m_res.get("skipped", 0) + m7_res.get("skipped", 0) + df_res.get("skipped", 0),
     }
 
     _LAST_SYNC_META["last_run"] = base_time

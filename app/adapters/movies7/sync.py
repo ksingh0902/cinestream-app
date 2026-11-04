@@ -116,6 +116,9 @@ def sync_movies7(pages_per_category: int = 5) -> dict:
 
     count_movies = 0
     count_series = 0
+    added = 0
+    updated = 0
+    skipped = 0
 
     try:
         items = list(catalog.iter_catalog(max_pages=pages_per_category))
@@ -125,11 +128,26 @@ def sync_movies7(pages_per_category: int = 5) -> dict:
             try:
                 from ...api.routes_catalog import is_movie_available_on_primary_sources
                 if is_movie_available_on_primary_sources(it.title, it.year):
+                    skipped += 1
                     continue
             except Exception:
                 pass
+
+            exists = False
+            for c in connections:
+                r = c.execute("SELECT id FROM movies WHERE source=? AND source_id=?", (it.source, it.source_id)).fetchone()
+                if r:
+                    exists = True
+                    break
+
             for c in connections:
                 upsert_item(c, it)
+
+            if exists:
+                updated += 1
+            else:
+                added += 1
+
             if it.is_series:
                 count_series += 1
             else:
@@ -142,10 +160,13 @@ def sync_movies7(pages_per_category: int = 5) -> dict:
             c.close()
 
     total = count_movies + count_series
-    logger.info("Movies7 sync finished: %d total (%d movies, %d series)", total, count_movies, count_series)
+    logger.info("Movies7 sync finished: %d total (%d new, %d refreshed, %d duplicates skipped)", total, added, updated, skipped)
     return {
         "status": "success",
-        "total": total,
+        "total": len(items),
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
         "movies": count_movies,
         "series": count_series,
         "db_paths": db_paths,
