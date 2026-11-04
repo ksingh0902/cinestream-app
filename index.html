@@ -2782,6 +2782,103 @@ function stopIframeWatchTracker() {
   }
 }
 
+function isEpisodeRepresentation(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  return Boolean(
+    obj.is_episode === true ||
+    (obj.episode_id != null && obj.episode_id !== '') ||
+    (obj.episode_number != null && obj.episode_number !== '') ||
+    (obj.episode != null && obj.episode !== '') ||
+    (obj.e != null && obj.e !== '')
+  );
+}
+
+function isParentSeriesRepresentation(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (isEpisodeRepresentation(obj)) return false;
+  return Boolean(
+    obj.is_series === true ||
+    (Array.isArray(obj.seasons) && obj.seasons.length > 0) ||
+    obj.total_seasons != null ||
+    obj.season_count != null
+  );
+}
+
+function getCanonicalSeriesId(item, curId, currentSeriesData) {
+  // Step 1: Explicit parent series_id directly on the active item
+  if (item && item.series_id != null && item.series_id !== '') {
+    return String(item.series_id);
+  }
+
+  // Step 2: Reliable catalogue parent information from movieCache for curId
+  let cachedCur = null;
+  if (typeof window !== 'undefined' && window.movieCache && curId != null && curId !== '') {
+    cachedCur = window.movieCache.get(curId);
+    if (cachedCur && cachedCur.series_id != null && cachedCur.series_id !== '') {
+      return String(cachedCur.series_id);
+    }
+  }
+
+  // Step 3: Reliable catalogue parent information from movieCache for item.id (if distinct from curId)
+  let cachedItem = null;
+  if (typeof window !== 'undefined' && window.movieCache && item && item.id != null && item.id !== '' && item.id !== curId) {
+    cachedItem = window.movieCache.get(item.id);
+    if (cachedItem && cachedItem.series_id != null && cachedItem.series_id !== '') {
+      return String(cachedItem.series_id);
+    }
+  }
+
+  // Step 4: Validate currentSeriesData before trusting it.
+  // Never allow stale currentSeriesData from a previously played series to override the active item or curId!
+  const hasSeriesData = Boolean(currentSeriesData && typeof currentSeriesData === 'object');
+  const isSeriesDataRelevant = hasSeriesData && (
+    !curId ||
+    String(currentSeriesData.id) === String(curId) ||
+    String(currentSeriesData.series_id) === String(curId) ||
+    (cachedCur && String(currentSeriesData.id) === String(cachedCur.series_id)) ||
+    (cachedCur && String(currentSeriesData.series_id) === String(cachedCur.series_id)) ||
+    (item && String(currentSeriesData.id) === String(item.series_id)) ||
+    (item && String(currentSeriesData.id) === String(item.id) && isParentSeriesRepresentation(currentSeriesData))
+  );
+
+  if (isSeriesDataRelevant) {
+    if (currentSeriesData.series_id != null && currentSeriesData.series_id !== '') {
+      return String(currentSeriesData.series_id);
+    }
+    if (isParentSeriesRepresentation(currentSeriesData) && currentSeriesData.id != null && currentSeriesData.id !== '') {
+      return String(currentSeriesData.id);
+    }
+  }
+
+  // Step 5: Check if item or cached entries are established as parent series (NOT episodes)
+  if (isParentSeriesRepresentation(item) && item.id != null && item.id !== '') {
+    return String(item.id);
+  }
+  if (cachedCur && isParentSeriesRepresentation(cachedCur) && cachedCur.id != null && cachedCur.id !== '') {
+    return String(cachedCur.id);
+  }
+  if (cachedItem && isParentSeriesRepresentation(cachedItem) && cachedItem.id != null && cachedItem.id !== '') {
+    return String(cachedItem.id);
+  }
+
+  // Step 6: Fallback to curId or item.id ONLY after establishing it is not an episode representation
+  if (curId != null && curId !== '') {
+    const isCurEpisode = (cachedCur && isEpisodeRepresentation(cachedCur)) || (item && String(item.id) === String(curId) && isEpisodeRepresentation(item));
+    if (!isCurEpisode) {
+      return String(curId);
+    }
+  }
+
+  if (item && item.id != null && item.id !== '' && !isEpisodeRepresentation(item)) {
+    return String(item.id);
+  }
+
+  // Final fallback
+  if (curId != null && curId !== '') {
+    return String(curId);
+  }
+  return item && item.id != null ? String(item.id) : '';
+}
 function extractSeriesInfo(title, item) {
   const isSeries = !!(
     (activeSeasonNum != null && activeEpisodeNum != null) ||
@@ -2801,75 +2898,145 @@ function extractSeriesInfo(title, item) {
       if (eMatch) episode = parseInt(eMatch[1], 10);
     }
   }
-  const seriesId = item?.series_id || item?.id || curId || '';
+  const seriesId = getCanonicalSeriesId(item, curId, currentSeriesData);
   const seasonNum = season || 1;
   const episodeNum = episode || 1;
   const contentId = isSeries
     ? `series_${seriesId}_s${seasonNum}_e${episodeNum}`
     : `movie_${item?.id || curId || ''}`;
-  return { isSeries, season: seasonNum, episode: episodeNum, contentId };
+  return { isSeries, season: seasonNum, episode: episodeNum, contentId, seriesId };
 }
+function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData) {
+  const curS = parseInt(currentSeason, 10);
+  const curE = parseInt(currentEpisode, 10);
+  const sNum = isNaN(curS) ? 1 : curS;
+  const eNum = isNaN(curE) ? 1 : curE;
 
-function formatTime(sec) {
-  if (isNaN(sec) || sec < 0) return '0:00';
-  sec = Math.floor(sec);
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) {
-    return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  if (seriesData && Array.isArray(seriesData.seasons) && seriesData.seasons.length > 0) {
+    // 1. Check current season: collect valid positive episode numbers and sort ascending
+    const curSeasonObj = seriesData.seasons.find(s => parseInt(s.season_number, 10) === sNum);
+    if (curSeasonObj && Array.isArray(curSeasonObj.episodes)) {
+      const seasonEps = curSeasonObj.episodes
+        .map(ep => ({
+          ...ep,
+          num: parseInt(ep.episode_number ?? ep.e, 10)
+        }))
+        .filter(ep => Number.isFinite(ep.num) && ep.num > 0)
+        .sort((a, b) => a.num - b.num);
+
+      // Find the next episode with num > eNum (handles non-contiguous numbers safely)
+      const nextEp = seasonEps.find(ep => ep.num > eNum);
+      if (nextEp) {
+        return {
+          hasNext: true,
+          season: sNum,
+          episode: nextEp.num,
+          isFinalOfSeries: false
+        };
+      }
+    }
+
+    // 2. Look for the next regular season (season_number > sNum and season_number > 0 to exclude specials)
+    const futureSeasons = seriesData.seasons
+      .map(s => ({
+        ...s,
+        sNum: parseInt(s.season_number, 10)
+      }))
+      .filter(s => Number.isFinite(s.sNum) && s.sNum > sNum && s.sNum > 0)
+      .sort((a, b) => a.sNum - b.sNum);
+
+    for (const nextSeasonObj of futureSeasons) {
+      if (Array.isArray(nextSeasonObj.episodes)) {
+        const nextSeasonEps = nextSeasonObj.episodes
+          .map(ep => ({
+            ...ep,
+            num: parseInt(ep.episode_number ?? ep.e, 10)
+          }))
+          .filter(ep => Number.isFinite(ep.num) && ep.num > 0)
+          .sort((a, b) => a.num - b.num);
+
+        if (nextSeasonEps.length > 0) {
+          return {
+            hasNext: true,
+            season: nextSeasonObj.sNum,
+            episode: nextSeasonEps[0].num, // smallest valid episode number in that season
+            isFinalOfSeries: false
+          };
+        }
+      }
+    }
+
+    // 3. No higher season/episode currently found in catalogue response
+    // Only mark confirmed final completion if catalogue explicitly establishes the series has ended.
+    // If the catalogue data is incomplete/returning/partial, do NOT claim the series is completed.
+    const statusStr = String(seriesData.status || '').trim().toLowerCase();
+    const isConfirmedEnded = Boolean(
+      seriesData.is_ended === true ||
+      seriesData.is_completed === true ||
+      seriesData.confirmed_final === true ||
+      statusStr === 'ended' ||
+      statusStr === 'canceled' ||
+      statusStr === 'cancelled'
+    );
+
+    return {
+      hasNext: false,
+      season: sNum,
+      episode: eNum,
+      isFinalOfSeries: isConfirmedEnded
+    };
   }
-  return `${m}:${s < 10 ? '0' : ''}${s}`;
+
+  // Fallback when catalogue season tree is not available: assume next episode in sequence exists
+  return {
+    hasNext: true,
+    season: sNum,
+    episode: eNum + 1,
+    isFinalOfSeries: false
+  };
 }
+function handleEpisodeFinished(seriesId, seasonNum, episodeNum, currentItem, duration, hasVerifiedDuration, observedCurrentTime) {
+  const canonicalSeriesId = getCanonicalSeriesId(currentItem, curId, currentSeriesData) || seriesId;
+  const epContentId = `series_${canonicalSeriesId}_s${seasonNum}_e${episodeNum}`;
+  const validDuration = (Number.isFinite(duration) && duration > 0) ? Math.floor(duration) : null;
+  const isDurationVerified = Boolean(hasVerifiedDuration && validDuration);
 
-function formatRemaining(sec) {
-  if (isNaN(sec) || sec <= 0) return '';
-  sec = Math.floor(sec);
-  const m = Math.round(sec / 60);
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    const remM = m % 60;
-    return remM > 0 ? `${h}h ${remM}m left` : `${h}h left`;
-  }
-  return `${Math.max(1, m)}m left`;
+  // Preserve the actual observed playback position; never substitute catalogue duration
+  let actualTime = (Number.isFinite(observedCurrentTime) && observedCurrentTime >= 0)
+    ? Math.floor(observedCurrentTime)
+    : Math.floor(video?.currentTime || iframeCurrentTime || 0);
+
+  // Determine next episode info
+  const nextInfo = getNextEpisodeInfo(canonicalSeriesId, seasonNum, episodeNum, currentSeriesData);
+
+  // Mark this individual episode as completed and preserve its progress record
+  const epEntry = {
+    contentId: epContentId,
+    id: curId,
+    series_id: canonicalSeriesId,
+    title: currentItem.title || document.getElementById('p-title')?.textContent?.trim() || `Series #${canonicalSeriesId}`,
+    poster: currentItem.poster || currentItem.poster_url || '',
+    year: currentItem.year || '',
+    is_series: true,
+    season: seasonNum,
+    episode: episodeNum,
+    source: currentItem.source || currentSeriesData?.source || 'yomovies',
+    is_hindi_dubbed: !!currentItem.is_hindi_dubbed,
+    currentTime: actualTime,
+    duration: validDuration,
+    hasVerifiedDuration: isDurationVerified,
+    progressPct: 100,
+    isCompleted: true,
+    completedAt: Date.now(),
+    updatedAt: Date.now(),
+    nextSeason: nextInfo.hasNext ? nextInfo.season : null,
+    nextEpisode: nextInfo.hasNext ? nextInfo.episode : null,
+    isSeriesCompleted: Boolean(nextInfo.isFinalOfSeries)
+  };
+
+  StorageManager.saveItem(epEntry);
+  renderContinueWatching();
 }
-
-function updateHorizontalRailControls(id) {
-  const rail = document.getElementById(id);
-  if (!rail) return;
-  const isFilter = id === 'filter-bar';
-  const left = document.getElementById(isFilter ? 'filter-left' : 'cw-left');
-  const right = document.getElementById(isFilter ? 'filter-right' : 'cw-right');
-  if (!left || !right) return;
-
-  const hasOverflow = rail.scrollWidth > rail.clientWidth + 4;
-  left.classList.toggle('rail-empty', !hasOverflow);
-  right.classList.toggle('rail-empty', !hasOverflow);
-  left.disabled = !hasOverflow || rail.scrollLeft <= 2;
-  right.disabled = !hasOverflow || rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 2;
-}
-
-function scrollHorizontalRail(id, direction) {
-  const rail = document.getElementById(id);
-  if (!rail) return;
-  const amount = Math.max(220, Math.floor(rail.clientWidth * 0.72));
-  rail.scrollBy({ left: direction * amount, behavior: 'smooth' });
-  setTimeout(() => updateHorizontalRailControls(id), 260);
-}
-
-['filter-bar', 'cw-carousel'].forEach((id) => {
-  const rail = document.getElementById(id);
-  if (rail) rail.addEventListener('scroll', () => updateHorizontalRailControls(id), { passive: true });
-});
-window.addEventListener('resize', () => {
-  updateHorizontalRailControls('filter-bar');
-  updateHorizontalRailControls('cw-carousel');
-}, { passive: true });
-requestAnimationFrame(() => {
-  updateHorizontalRailControls('filter-bar');
-  updateHorizontalRailControls('cw-carousel');
-});
-
 function renderContinueWatching() {
   const section = document.getElementById('cw-section');
   const carousel = document.getElementById('cw-carousel');
@@ -2881,7 +3048,42 @@ function renderContinueWatching() {
     return;
   }
 
-  const items = StorageManager.getAll().filter(it => (it.progressPct || 0) < 95);
+  const allItems = StorageManager.getAll();
+  const seriesGroups = new Map();
+  const movieItems = [];
+
+  for (const it of allItems) {
+    const isSeries = !!(it.is_series || (it.contentId && it.contentId.startsWith('series_')));
+    if (isSeries) {
+      const sMatch = it.contentId ? it.contentId.match(/^series_(.+)_s\d+_e\d+$/) : null;
+      const sId = String(it.series_id || (sMatch ? sMatch[1] : null) || it.id || 'series');
+      if (!seriesGroups.has(sId)) {
+        seriesGroups.set(sId, []);
+      }
+      seriesGroups.get(sId).push(it);
+    } else {
+      // Movies: apply existing 95% completion threshold and removal rules
+      if ((it.progressPct || 0) < 95 && !it.isCompleted) {
+        movieItems.push(it);
+      }
+    }
+  }
+
+  const selectedSeriesItems = [];
+  for (const [sId, epList] of seriesGroups.entries()) {
+    // Sort episodes: most recently updated first
+    epList.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // Find the most recently active episode (incomplete preferred, or latest completed)
+    const activeEp = epList.find(ep => !ep.isCompleted) || epList[0];
+    if (activeEp) {
+      selectedSeriesItems.push(activeEp);
+    }
+  }
+
+  const items = [...movieItems, ...selectedSeriesItems].sort(
+    (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+  );
+
   if (items.length === 0) {
     section.style.display = 'none';
     return;
@@ -2891,10 +3093,28 @@ function renderContinueWatching() {
 
   carousel.innerHTML = items.map(it => {
     const timeFormatted = formatTime(it.currentTime);
-    const remFormatted = formatRemaining(it.duration - it.currentTime);
-    const metaText = it.is_series && (it.season || it.episode)
-      ? `S${it.season || 1}:E${it.episode || 1}${remFormatted ? ' · ' + remFormatted : ''}`
-      : `${timeFormatted}${remFormatted ? ' · ' + remFormatted : ''}`;
+    const remFormatted = (it.duration && it.duration > it.currentTime) ? formatRemaining(it.duration - it.currentTime) : '';
+    let metaText = '';
+    let targetSeason = it.season || 'null';
+    let targetEpisode = it.episode || 'null';
+
+    if (it.is_series) {
+      if (it.isCompleted) {
+        if (it.nextSeason && it.nextEpisode) {
+          metaText = `Up Next: S${it.nextSeason}:E${it.nextEpisode}`;
+          targetSeason = it.nextSeason;
+          targetEpisode = it.nextEpisode;
+        } else if (it.isSeriesCompleted) {
+          metaText = `S${it.season || 1}:E${it.episode || 1} · Completed`;
+        } else {
+          metaText = `S${it.season || 1}:E${it.episode || 1} · Watched`;
+        }
+      } else {
+        metaText = `S${it.season || 1}:E${it.episode || 1}${remFormatted ? ' · ' + remFormatted : ''}`;
+      }
+    } else {
+      metaText = `${timeFormatted}${remFormatted ? ' · ' + remFormatted : ''}`;
+    }
 
     const dubBadge = it.is_hindi_dubbed ? '<span class="cw-card-badge" style="background:#059669;color:#fff;">🎙️ Dubbed</span>' : '';
     const srcBadge = it.source === 'ask4movie'
@@ -2905,8 +3125,9 @@ function renderContinueWatching() {
           ? '<span class="cw-card-badge" style="background:#7c3aed;color:#fff;">🎬 m7</span>'
           : '<span class="cw-card-badge" style="background:#1d4ed8;color:#fff;">🎬 ym</span>'));
 
+    const playerTargetId = (it.is_series && it.series_id) ? it.series_id : it.id;
     return `
-      <div class="cw-card" tabindex="0" role="button" aria-label="Continue ${esc(it.title)}" onclick="openPlayer(${it.id}, ${it.season || 'null'}, ${it.episode || 'null'})">
+      <div class="cw-card" tabindex="0" role="button" aria-label="Continue ${esc(it.title)}" onclick="openPlayer('${esc(String(playerTargetId))}', ${targetSeason}, ${targetEpisode})">
         <button class="cw-btn-remove" onclick="removeCwItem('${esc(it.contentId)}', event)" title="Remove from Continue Watching">&times;</button>
         <div class="cw-poster-wrap">
           <img src="${esc(getCardPosterUrl(it.poster, it.title, it.year, it.source))}" alt="${esc(it.title)}" data-title="${esc(it.title)}" data-year="${esc(it.year||'')}" data-source="${esc(it.source||'')}" loading="lazy" onerror="handleCardImgError(this)">
@@ -2914,7 +3135,7 @@ function renderContinueWatching() {
             <div class="cw-play-icon">▶</div>
           </div>
           <div class="cw-progress-bg">
-            <div class="cw-progress-fill" style="width:${Math.min(100, Math.max(1, it.progressPct || 0))}%;"></div>
+            <div class="cw-progress-fill" style="width:${Math.min(100, Math.max(1, (it.isCompleted && !it.nextSeason) ? 100 : (it.progressPct || 0)))}%;"></div>
           </div>
         </div>
         <div class="cw-card-info">
@@ -2934,11 +3155,40 @@ function renderContinueWatching() {
 
 function removeCwItem(contentId, e) {
   if (e) e.stopPropagation();
-  StorageManager.removeItem(contentId);
+  if (!contentId) return;
+
+  const targetItem = StorageManager.getItem(contentId);
+  let targetSeriesId = targetItem?.series_id ? String(targetItem.series_id) : null;
+
+  if (!targetSeriesId && contentId.startsWith('series_')) {
+    const sMatch = contentId.match(/^series_(.+)_s\d+_e\d+$/);
+    if (sMatch) {
+      targetSeriesId = sMatch[1];
+    }
+  }
+
+  if (targetSeriesId) {
+    const all = StorageManager.getAll();
+    for (const it of all) {
+      const itSeriesId = it.series_id ? String(it.series_id) : null;
+      const itContentId = it.contentId || '';
+      const itMatch = itContentId.match(/^series_(.+)_s\d+_e\d+$/);
+      const parsedSeriesId = itMatch ? itMatch[1] : null;
+
+      if (
+        (itSeriesId && itSeriesId === targetSeriesId) ||
+        (parsedSeriesId && parsedSeriesId === targetSeriesId) ||
+        (it.is_series && String(it.id) === targetSeriesId)
+      ) {
+        StorageManager.removeItem(it.contentId);
+      }
+    }
+  } else {
+    StorageManager.removeItem(contentId);
+  }
   renderContinueWatching();
   showHud('Removed from Continue Watching');
 }
-
 function clearAllContinueWatching() {
   if (confirm("Clear viewing progress saved in this browser? This only affects this device and will not affect other viewers sharing this account.")) {
     StorageManager.clearAll();
@@ -2957,7 +3207,11 @@ function checkAndShowResumeBanner(contentId) {
   if (!banner) return;
 
   const saved = StorageManager.getItem(contentId);
-  if (saved && saved.currentTime >= 5 && (!saved.duration || (saved.currentTime / saved.duration) < 0.95)) {
+  const isSeries = !!(saved?.is_series || (contentId && contentId.startsWith('series_')));
+  const isEligible = saved && saved.currentTime >= 5 && (
+    isSeries ? !saved.isCompleted : (!saved.duration || (saved.currentTime / saved.duration) < 0.95)
+  );
+  if (isEligible) {
     currentSavedProgress = saved;
     const timeFormatted = formatTime(saved.currentTime);
     document.getElementById('resume-text').textContent = `Resume from ${timeFormatted}?`;
@@ -2989,7 +3243,19 @@ function restartPlaybackFromBeginning() {
   iframeWatchStartTimestamp = Date.now();
   currentSavedProgress = null;
   if (activeContentId) {
-    StorageManager.removeItem(activeContentId);
+    const isSeries = activeContentId.startsWith('series_');
+    if (isSeries) {
+      const existing = StorageManager.getItem(activeContentId);
+      if (existing) {
+        existing.currentTime = 0;
+        existing.progressPct = 0;
+        existing.isCompleted = false;
+        existing.updatedAt = Date.now();
+        StorageManager.saveItem(existing);
+      }
+    } else {
+      StorageManager.removeItem(activeContentId);
+    }
     renderContinueWatching();
   }
   if (video) {
@@ -3042,7 +3308,7 @@ function savePlaybackProgress(force = false) {
       hasVerifiedDuration = iframeHasVerifiedDuration;
     } else {
       currentTime = iframeActiveWatchTime || 0;
-      duration = (iframeDuration > 0) ? iframeDuration : (window.movieCache?.get(curId)?.duration_s || 2700);
+      duration = (iframeDuration > 0) ? iframeDuration : (window.movieCache?.get(curId)?.duration_s || null);
       isEnded = false;
       hasVerifiedDuration = false;
     }
@@ -3050,8 +3316,10 @@ function savePlaybackProgress(force = false) {
       const cached = window.movieCache?.get(curId);
       if (cached && cached.duration_s && cached.duration_s > 0) {
         duration = cached.duration_s;
+        hasVerifiedDuration = false; // Catalogue duration is not verified stream duration
       } else {
-        duration = 2700;
+        duration = null;
+        hasVerifiedDuration = false;
       }
     }
   } else if (video) {
@@ -3062,23 +3330,38 @@ function savePlaybackProgress(force = false) {
   }
 
   if (isNaN(currentTime) || currentTime < 5) return;
-  if (isNaN(duration) || duration <= 0) return;
   // Guard against overwriting saved position if player was just reloaded and currentTime hasn't caught up
   if (targetSeekTime > 10 && currentTime < 10) return;
 
-  // 95% Completion policy:
-  // An item is removed from Continue Watching only when:
-  // 1) Duration is verified and >= 300s (protecting against short ad frames and unverified catalogue fallbacks)
-  // 2) Playback has reached at least 95% completion:
-  //    either (currentTime / duration) >= 0.95, or a verified ended event when (currentTime / duration) >= 0.95
-  const isCompleted = hasVerifiedDuration && duration >= 300 && (
-    (currentTime / duration) >= 0.95 ||
-    (isEnded && (currentTime / duration) >= 0.95)
+  const currentItem = window.movieCache?.get(curId) || currentSeriesData || {};
+  const seriesInfo = extractSeriesInfo(currentItem.title, currentItem);
+  const isSeries = !!(
+    seriesInfo.isSeries ||
+    (activeContentId && activeContentId.startsWith('series_')) ||
+    (activeSeasonNum != null && activeEpisodeNum != null)
   );
 
-  if (isCompleted) {
-    StorageManager.removeItem(activeContentId);
-    renderContinueWatching();
+  const parentSeriesId = getCanonicalSeriesId(currentItem, curId, currentSeriesData);
+  const sNum = (activeSeasonNum != null) ? activeSeasonNum : (seriesInfo.season || 1);
+  const eNum = (activeEpisodeNum != null) ? activeEpisodeNum : (seriesInfo.episode || 1);
+
+  // 1. Movies: Apply existing 95% completion threshold and removal rules unchanged
+  if (!isSeries) {
+    if (isNaN(duration) || duration <= 0) return;
+    const isCompletedMovie = hasVerifiedDuration && duration >= 300 && (
+      (currentTime / duration) >= 0.95 ||
+      (isEnded && (currentTime / duration) >= 0.95)
+    );
+    if (isCompletedMovie) {
+      StorageManager.removeItem(activeContentId);
+      renderContinueWatching();
+      return;
+    }
+  }
+
+  // 2. Web Series Episodes: ONLY genuine ended events mark completion. Never infer from final seconds!
+  if (isSeries && isEnded) {
+    handleEpisodeFinished(parentSeriesId, sNum, eNum, currentItem, duration, hasVerifiedDuration, currentTime);
     return;
   }
 
@@ -3088,24 +3371,25 @@ function savePlaybackProgress(force = false) {
   }
   lastProgressSaveTime = currentTime;
 
-  const currentItem = window.movieCache?.get(curId) || currentSeriesData || {};
-  const seriesInfo = extractSeriesInfo(currentItem.title, currentItem);
-
+  const validDuration = (Number.isFinite(duration) && duration > 0) ? Math.floor(duration) : null;
+  const canonicalContentId = isSeries ? `series_${parentSeriesId}_s${sNum}_e${eNum}` : activeContentId;
   const entry = {
-    contentId: activeContentId,
+    contentId: canonicalContentId,
     id: curId,
-    title: currentItem.title || document.getElementById('p-title')?.textContent?.trim() || `Movie #${curId}`,
+    series_id: isSeries ? parentSeriesId : null,
+    title: currentItem.title || document.getElementById('p-title')?.textContent?.trim() || (isSeries ? `Series #${parentSeriesId}` : `Movie #${curId}`),
     poster: currentItem.poster || currentItem.poster_url || '',
     year: currentItem.year || '',
-    is_series: seriesInfo.isSeries,
-    season: seriesInfo.season,
-    episode: seriesInfo.episode,
+    is_series: isSeries,
+    season: isSeries ? sNum : null,
+    episode: isSeries ? eNum : null,
     source: currentItem.source || currentSeriesData?.source || 'yomovies',
     is_hindi_dubbed: !!currentItem.is_hindi_dubbed,
     currentTime: Math.floor(currentTime),
-    duration: Math.floor(duration),
-    hasVerifiedDuration: hasVerifiedDuration,
-    progressPct: Math.round((currentTime / duration) * 100),
+    duration: validDuration,
+    hasVerifiedDuration: Boolean(hasVerifiedDuration && validDuration),
+    progressPct: (validDuration && validDuration > 0) ? Math.round((currentTime / validDuration) * 100) : 0,
+    isCompleted: false,
     updatedAt: Date.now()
   };
 
@@ -3150,8 +3434,13 @@ video.addEventListener('playing', () => {
 });
 video.addEventListener('ended', () => {
   if (activeContentId) {
-    StorageManager.removeItem(activeContentId);
-    renderContinueWatching();
+    const isSeries = activeContentId.startsWith('series_');
+    if (!isSeries) {
+      StorageManager.removeItem(activeContentId);
+      renderContinueWatching();
+    } else {
+      savePlaybackProgress(true);
+    }
   }
 });
 document.addEventListener('visibilitychange', () => {
@@ -3767,16 +4056,19 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   currentIframeOrigin = null;
 
   // Reset episode and series state when opening content
+  currentSeriesData = null;
+  const initItem = window.movieCache?.get(id) || {};
+  const sInfo = extractSeriesInfo(initItem.title, initItem);
+  const canonInitId = sInfo.seriesId || getCanonicalSeriesId(initItem, id, null);
   if(targetSeason != null && targetEpisode != null){
     activeSeasonNum = targetSeason;
     activeEpisodeNum = targetEpisode;
-    activeContentId = `series_${id}_s${targetSeason}_e${targetEpisode}`;
+    activeContentId = `series_${canonInitId}_s${targetSeason}_e${targetEpisode}`;
   } else {
     activeSeasonNum = null;
     activeEpisodeNum = null;
-    activeContentId = `movie_${id}`;
+    activeContentId = sInfo.isSeries ? sInfo.contentId : `movie_${id}`;
   }
-  currentSeriesData = null;
   dismissResumePrompt();
   dismissNextEpisodeToast(false);
   nextEpPromptKey = '';
@@ -3790,8 +4082,6 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
     seasonsWrap.innerHTML = '';
   }
 
-  const initItem = window.movieCache?.get(id) || {};
-  const sInfo = extractSeriesInfo(initItem.title, initItem);
   if(activeSeasonNum == null && activeEpisodeNum == null){
     if (sInfo.isSeries) {
       activeSeasonNum = sInfo.season || 1;
@@ -3977,9 +4267,10 @@ async function loadSeriesSeasons(id){
       return;
     }
     currentSeriesData = data;
+    const canonSeriesId = getCanonicalSeriesId(data, id, data);
     if(activeSeasonNum == null) activeSeasonNum = data.current_season || 1;
     if(activeEpisodeNum == null) activeEpisodeNum = data.current_episode || 1;
-    activeContentId = `series_${id}_s${activeSeasonNum}_e${activeEpisodeNum}`;
+    activeContentId = `series_${canonSeriesId}_s${activeSeasonNum}_e${activeEpisodeNum}`;
     checkAndShowResumeBanner(activeContentId);
     if (currentSavedProgress && currentSavedProgress.currentTime) {
       iframeBaseOffset = currentSavedProgress.currentTime;
@@ -4082,7 +4373,8 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
   activeIframeSessionId = 0;
   activeSeasonNum = sNum;
   activeEpisodeNum = eNum;
-  activeContentId = `series_${curId}_s${sNum}_e${eNum}`;
+  const canonSeriesId = getCanonicalSeriesId(currentSeriesData, curId, currentSeriesData);
+  activeContentId = `series_${canonSeriesId}_s${sNum}_e${eNum}`;
   lastProgressSaveTime = 0;
   targetSeekTime = 0;
   iframeCurrentTime = 0;
@@ -5164,13 +5456,20 @@ window.addEventListener('message', (event) => {
       }
     }
 
-    // 6. Completion safety: NEVER allow premature or ad-related ended events to bypass the 95% threshold
+    // 6. Completion event verification: Only genuine completion event signals from the active provider are accepted.
+    // Never substitute a percentage heuristic (e.g. curTime / duration >= 0.95) for a genuine completion signal.
     const evt = (data.event || data.type || data.action || data.status || data.data?.player_status || '').toString().toLowerCase();
-    const isEndedMsg = evt === 'ended' || evt === 'finish' || evt === 'complete' || evt === 'playback_ended' || (data.data && data.data.player_status === 'ended');
+    const isEndedMsg = (
+      evt === 'ended' ||
+      evt === 'complete' ||
+      evt === 'completed' ||
+      evt === 'playback_ended' ||
+      evt === 'finish' ||
+      (data.data && String(data.data.player_status).toLowerCase() === 'ended')
+    );
 
-    // A genuine ended event is accepted only when duration is verified (>= 300s)
-    // AND the stream actually reached the 95% completion threshold
-    if (isEndedMsg && iframeDuration >= 300 && (iframeCurrentTime / iframeDuration) >= 0.95) {
+    // Accept genuine ended event from real main content (duration >= 300s to filter out ad frame completions)
+    if (isEndedMsg && iframeDuration >= 300) {
       iframePlaybackEnded = true;
     }
 
@@ -5181,8 +5480,15 @@ window.addEventListener('message', (event) => {
 
     // 8. Completed verification
     if (iframePlaybackEnded) {
-      if (activeContentId) StorageManager.removeItem(activeContentId);
-      renderContinueWatching();
+      if (activeContentId) {
+        const isSeries = activeContentId.startsWith('series_');
+        if (!isSeries) {
+          StorageManager.removeItem(activeContentId);
+          renderContinueWatching();
+        } else {
+          savePlaybackProgress(true);
+        }
+      }
     }
   } catch (_) {}
 });
