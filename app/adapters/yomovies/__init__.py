@@ -125,10 +125,38 @@ class YomoviesAdapter(SourceAdapter):
                 data = self._resolver.resolve(e["code"], e.get("url"), force=True)
                 if data and data.get("hls"):
                     hls_url = f"/proxy/hls?u={quote(data['hls'], safe='')}"
+                    servers = [{"label": "Server 1 (Speedostream HLS) (Recommended)", "url": hls_url, "kind": "hls"}]
+                    # Check for secondary iframe embeds on this title (e.g. netu.ac)
+                    for alt_e in embeds:
+                        alt_host = (alt_e.get("host") or "").lower()
+                        alt_url = (alt_e.get("url") or "").lower()
+                        if "speedo" in alt_host or "speedostream" in alt_url or "/embed-" in alt_url:
+                            continue
+                        if alt_e.get("url"):
+                            srv_name = alt_e.get("host") or "Embed"
+                            servers.append({
+                                "label": f"Server {len(servers)+1} ({srv_name})",
+                                "url": alt_e["url"],
+                                "kind": "iframe"
+                            })
+                    # Add FilmU & VIP-No ADS as secondary fallbacks if TMDB ID is available
+                    try:
+                        with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                            conn.row_factory = sqlite3.Row
+                            r = conn.execute("SELECT tmdb_id, is_series FROM movies WHERE detail_url=? OR url=?", (detail_url, detail_url)).fetchone()
+                        if r and r["tmdb_id"]:
+                            tid = str(r["tmdb_id"])
+                            is_s = bool(r["is_series"])
+                            f_url = f"https://embed.filmu.in/{'tv' if is_s else 'movie'}/{tid}" + ("/1/1" if is_s else "")
+                            vip_url = f"https://embed.vidsrc.si/embed/{'tv' if is_s else 'movie'}/{tid}" + ("/1/1" if is_s else "") + "?autoplay=1&ds_lang=en"
+                            servers.append({"label": f"Server {len(servers)+1} (FilmU - Fast HD)", "url": f_url, "kind": "iframe"})
+                            servers.append({"label": f"Server {len(servers)+1} (VIP - No ADS)", "url": vip_url, "kind": "iframe"})
+                    except Exception:
+                        pass
                     return StreamInfo(
                         kind="hls",
                         url=hls_url,
-                        servers=[{"label": "Speedostream (HLS)", "url": hls_url}],
+                        servers=servers,
                         ttl_s=STREAM_TTL,
                     )
 
@@ -140,10 +168,12 @@ class YomoviesAdapter(SourceAdapter):
                 # NEVER return raw speedostream iframe: speedostream blocks iframe embedding with "Embeds disabled3"
                 continue
             if e.get("url"):
+                srv_name = e.get("host", "Embed")
+                servers = [{"label": f"Server 1 ({srv_name}) (Recommended)", "url": e["url"], "kind": "iframe"}]
                 return StreamInfo(
                     kind="iframe",
                     url=e["url"],
-                    servers=[{"label": e.get("host", "Server 1"), "url": e["url"]}],
+                    servers=servers,
                     ttl_s=STREAM_TTL,
                 )
 

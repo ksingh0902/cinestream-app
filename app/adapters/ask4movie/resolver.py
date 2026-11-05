@@ -146,25 +146,26 @@ def parse_player(html: str, page_url: str) -> StreamInfo | None:
                         u = d["url"]
                         u_lower = u.lower()
                         raw_name = d.get("raw_name", "")
+                        rec_tag = " (Recommended)" if i == 0 else ""
                         if "filmu" in u_lower:
-                            lbl = f"Server {i+1} (FilmU - Fast HD)"
+                            lbl = f"Server {i+1} (FilmU - Fast HD){rec_tag}"
                         elif "vidsrc.si" in u_lower or "vip" in raw_name.lower():
-                            lbl = f"Server {i+1} (VIP - No ADS)"
+                            lbl = f"Server {i+1} (VIP - No ADS){rec_tag}"
                         elif "vidfast" in u_lower:
-                            lbl = f"Server {i+1} (Fast UI - HD)"
+                            lbl = f"Server {i+1} (Fast UI - HD){rec_tag}"
                         elif "vidup" in u_lower:
-                            lbl = f"Server {i+1} (VidUp - Multi)"
+                            lbl = f"Server {i+1} (VidUp - Multi){rec_tag}"
                         elif "vidrock" in u_lower:
-                            lbl = f"Server {i+1} (VidRock)"
+                            lbl = f"Server {i+1} (VidRock){rec_tag}"
                         elif "vidsrc.mov" in u_lower:
-                            lbl = f"Server {i+1} (VidSrc - Mov)"
+                            lbl = f"Server {i+1} (VidSrc - Mov){rec_tag}"
                         elif "vidsrc.fyi" in u_lower:
-                            lbl = f"Server {i+1} (VidSrc - Fast)"
+                            lbl = f"Server {i+1} (VidSrc - Fast){rec_tag}"
                         elif raw_name:
-                            lbl = f"Server {i+1} ({raw_name})"
+                            lbl = f"Server {i+1} ({raw_name}){rec_tag}"
                         else:
-                            lbl = f"Server {i+1}"
-                        servers.append({"label": lbl, "url": u})
+                            lbl = f"Server {i+1}{rec_tag}"
+                        servers.append({"label": lbl, "url": u, "kind": "iframe"})
 
                     return StreamInfo(kind="iframe", url=servers[0]["url"], servers=servers)
 

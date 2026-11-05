@@ -4381,6 +4381,9 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   iframeWatchStartTimestamp = 0;
   iframeBaseOffset = 0;
   currentIframeOrigin = null;
+  clearPlaybackWatchdog();
+  currentStreamServers = [];
+  activeStreamServerIndex = 0;
 
   // Reset episode and series state when opening content
   currentSeriesData = null;
@@ -4943,6 +4946,144 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
   }
 }
 
+let currentStreamServers = [];
+let activeStreamServerIndex = 0;
+let playbackWatchdogTimer = null;
+
+function clearPlaybackWatchdog(){
+  if(playbackWatchdogTimer){
+    clearTimeout(playbackWatchdogTimer);
+    playbackWatchdogTimer = null;
+  }
+}
+
+function startPlaybackWatchdog(serverIdx){
+  clearPlaybackWatchdog();
+  const capturedSessionId = currentPlaybackSessionId;
+  const capturedContentId = activeContentId;
+
+  playbackWatchdogTimer = setTimeout(() => {
+    if(capturedSessionId !== currentPlaybackSessionId || capturedContentId !== activeContentId) return;
+    const isWatching = (overlay && overlay.classList.contains('on')) || document.body.classList.contains('watch-page');
+    if(!isWatching) return;
+
+    const srv = currentStreamServers[serverIdx];
+    const srvKind = srv?.kind || (srv?.url?.includes('/proxy/hls') || srv?.url?.includes('.m3u8') ? 'hls' : 'iframe');
+
+    let hasStarted = false;
+    if(srvKind === 'iframe'){
+      hasStarted = iframeHasVerifiedDuration || (iframeCurrentTime > 0);
+    } else {
+      hasStarted = (video && !video.paused && video.currentTime > 0);
+    }
+
+    if(!hasStarted){
+      const nextIdx = serverIdx + 1;
+      if(currentStreamServers && nextIdx < currentStreamServers.length){
+        const nextSrv = currentStreamServers[nextIdx];
+        const curLabel = (srv?.label || `Server ${serverIdx + 1}`).replace(/\s*\(Recommended\)/, '');
+        const nextLabel = (nextSrv?.label || `Server ${nextIdx + 1}`).replace(/\s*\(Recommended\)/, '');
+        showHud(`${curLabel} unavailable — switching to ${nextLabel}…`);
+        statusEl.innerHTML = `<span class="spinner"></span> ${esc(curLabel)} unavailable — switching to ${esc(nextLabel)}…`;
+        activateStreamServer(nextIdx, true);
+      } else {
+        statusEl.innerHTML = `<span style="color:#ff8888">⚠️ Media unavailable across all servers for this title.</span>`;
+        if(retryWrap) retryWrap.style.display = 'block';
+      }
+    }
+  }, 10000);
+}
+
+function activateStreamServer(serverIdx, isAutoFallback = false){
+  if(!currentStreamServers || serverIdx >= currentStreamServers.length) return;
+  activeStreamServerIndex = serverIdx;
+  const srv = currentStreamServers[serverIdx];
+  const srvUrl = srv.url;
+  const srvKind = srv.kind || (srvUrl.includes('/proxy/hls') || srvUrl.includes('.m3u8') ? 'hls' : 'iframe');
+
+  const curWatchTime = Math.max(
+    (video && !isNaN(video.currentTime) && video.currentTime > 3) ? video.currentTime : 0,
+    (iframeActiveWatchTime > 3) ? iframeActiveWatchTime : (iframeCurrentTime > 3 ? iframeCurrentTime : 0),
+    targetSeekTime || 0,
+    keepTime || 0,
+    lastKnownPlayTime || 0
+  );
+
+  const srvBox = document.getElementById('server-switcher');
+  if(srvBox){
+    srvBox.querySelectorAll('.pill').forEach((btn, bIdx) => {
+      if(bIdx === serverIdx) btn.classList.add('active');
+      else btn.classList.remove('active');
+    });
+  }
+
+  const tagEp = (activeSeasonNum != null && activeEpisodeNum != null) ? ` · S${activeSeasonNum} E${activeEpisodeNum}` : '';
+  statusEl.textContent = `${srv.label || ('Server ' + (serverIdx + 1))}${tagEp} · Active stream player`;
+
+  const uLow = (srvUrl || '').toLowerCase();
+  const lblLow = (srv.label || '').toLowerCase();
+  const isFilm = uLow.includes('filmu') || lblLow.includes('filmu');
+  const isVipPill = uLow.includes('vidsrc.si') || lblLow.includes('vip');
+  if(isFilm){
+    dismissResumePrompt();
+  } else if(isVipPill){
+    const activeEpId = (typeof currentSeriesData !== 'undefined' && currentSeriesData)
+      ? getActiveSeriesEpisodeContentId(curId, activeSeasonNum, activeEpisodeNum)
+      : String(curId);
+    checkAndShowResumeBanner(activeEpId, true);
+  }
+
+  if(srvKind === 'iframe'){
+    if(hls){ hls.destroy(); hls = null; }
+    video.pause();
+    video.style.display = 'none';
+    if(pIframe){
+      pIframe.style.display = 'block';
+      setIframeSrc(srvUrl);
+      if(curWatchTime > 3){
+        startIframeSeekRetry(curWatchTime);
+        showHud('Resumed from ' + formatTime(curWatchTime));
+      }
+    }
+    if(isPreservingEpisodeFullscreen || isPlayerInFullscreen()){
+      if(playerContainer) playerContainer.classList.add('is-fullscreen');
+      document.body.classList.add('player-is-fullscreen');
+    }
+    startIframeWatchTracker();
+    checkAndTriggerNextEp();
+    const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
+    if(rw) rw.style.display = 'none';
+    if(fw) fw.style.display = 'none';
+    if(cc) cc.style.display = 'none';
+  } else {
+    // Native HLS player
+    stopIframeWatchTracker();
+    if(pIframe){
+      pIframe.style.display = 'none';
+      setIframeSrc('about:blank');
+    }
+    video.style.display = 'block';
+    if(isPreservingEpisodeFullscreen || isPlayerInFullscreen()){
+      if(playerContainer) playerContainer.classList.add('is-fullscreen');
+      document.body.classList.add('player-is-fullscreen');
+    }
+    const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
+    if(rw) rw.style.display = 'inline-flex';
+    if(fw) fw.style.display = 'inline-flex';
+    if(cc) cc.style.display = 'inline-flex';
+
+    if(curWatchTime > 3){
+      targetSeekTime = curWatchTime;
+      keepTime = curWatchTime;
+      showHud('Resumed from ' + formatTime(curWatchTime));
+    }
+    clearTimeout(tokenRefreshTimer);
+    attach(srvUrl, 'hls');
+  }
+
+  startPlaybackWatchdog(serverIdx);
+}
+
 async function fetchStream(id, fresh = false, season = null, episode = null){
   const mySeq = ++currentResolveSeq;
   if(currentStreamAbort) currentStreamAbort.abort();
@@ -4988,116 +5129,35 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
 
     const s = await res.json();
     if(mySeq !== currentResolveSeq) return;
-    if(!s.play && !s.url) throw new Error('No playable stream found.');
+    if(!s.play && !s.url && (!s.servers || s.servers.length === 0)) throw new Error('No playable stream found.');
 
     const playUrl = s.url || s.play;
     const kind = s.kind || (s.type === 'embed' ? 'iframe' : 'hls');
 
+    currentStreamServers = Array.isArray(s.servers) && s.servers.length > 0
+      ? s.servers
+      : [{"label": "Server 1 (Recommended)", "url": playUrl, "kind": kind}];
+    activeStreamServerIndex = 0;
+
     const srvBox = document.getElementById('server-switcher');
     if(srvBox) srvBox.innerHTML = '';
 
-    if(kind === 'iframe' || s.type === 'embed'){
-      // External embed player (Ask4Movie iframe / Vidsrc)
-      if(hls){ hls.destroy(); hls = null; }
-      video.pause();
-      video.style.display = 'none';
-      if(pIframe){
-        pIframe.style.display = 'block';
-        setIframeSrc(playUrl);
-        if (targetSeekTime > 0) {
-          startIframeSeekRetry(targetSeekTime);
-          showHud('Resumed from ' + formatTime(targetSeekTime));
-          targetSeekTime = 0;
-        }
-      }
-      if (isPreservingEpisodeFullscreen || isPlayerInFullscreen()) {
-        if (playerContainer) playerContainer.classList.add('is-fullscreen');
-        document.body.classList.add('player-is-fullscreen');
-      }
-      startIframeWatchTracker();
-      checkAndTriggerNextEp();
-      const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
-      if(rw) rw.style.display = 'none';
-      if(fw) fw.style.display = 'none';
-      if(cc) cc.style.display = 'none';
-
-      const firstServerLabel = (s.servers && s.servers.length > 0) ? s.servers[0].label : (s.host || 'HD');
-      const tagEp = (season != null && episode != null) ? ` · S${season} E${episode}` : '';
-      statusEl.textContent = `${firstServerLabel}${tagEp} · Active stream player ${s.cached ? '(cached)' : ''}`;
-
-      // On FilmU server, dismiss resume banner; on VIP-no-ads, allow resume banner
-      const isFilmU = playUrl.includes('filmu') || firstServerLabel.toLowerCase().includes('filmu');
-      const isVipServer = playUrl.includes('vidsrc.si') || firstServerLabel.toLowerCase().includes('vip');
-      if (isFilmU) {
-        dismissResumePrompt();
-      } else if (isVipServer) {
-        const activeEpId = (typeof currentSeriesData !== 'undefined' && currentSeriesData)
-          ? getActiveSeriesEpisodeContentId(id, season, episode)
-          : String(id);
-        checkAndShowResumeBanner(activeEpId, true);
-      }
-
-      // Server switcher pills
-      if(srvBox && s.servers && s.servers.length > 1){
-        s.servers.forEach((srv, idx) => {
-          const btn = document.createElement('button');
-          const isSelected = srv.url === playUrl || (!playUrl && idx === 0);
-          btn.className = 'pill' + (isSelected ? ' active' : '');
-          btn.textContent = srv.label || `Server ${idx + 1}`;
-          btn.style.cssText = 'padding:4px 12px;font-size:12px;cursor:pointer;';
-          btn.onclick = () => {
-            setIframeSrc(srv.url);
-            const curWatchTime = (iframeActiveWatchTime > 3) ? iframeActiveWatchTime : (iframeCurrentTime > 3 ? iframeCurrentTime : 0);
-            if (curWatchTime > 0) {
-              startIframeSeekRetry(curWatchTime);
-            }
-            srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))}${tagEp} · Active stream player`;
-
-            const uLow = (srv.url || '').toLowerCase();
-            const lblLow = (srv.label || '').toLowerCase();
-            const isFilm = uLow.includes('filmu') || lblLow.includes('filmu');
-            const isVipPill = uLow.includes('vidsrc.si') || lblLow.includes('vip');
-            if (isFilm) {
-              dismissResumePrompt();
-            } else if (isVipPill) {
-              const activeEpId = (typeof currentSeriesData !== 'undefined' && currentSeriesData)
-                ? getActiveSeriesEpisodeContentId(curId, currentSeason, currentEpisode)
-                : String(curId);
-              checkAndShowResumeBanner(activeEpId, true);
-            }
-          };
-          srvBox.appendChild(btn);
-        });
-        srvBox.style.display = 'flex';
-      } else if(srvBox) {
-        srvBox.style.display = 'none';
-      }
-    } else {
-      // Native HLS player (YoMovies / Speedostream)
-      stopIframeWatchTracker();
-      if(pIframe){
-        pIframe.style.display = 'none';
-        setIframeSrc('about:blank');
-      }
-      if(srvBox) srvBox.style.display = 'none';
-      video.style.display = 'block';
-      if (isPreservingEpisodeFullscreen || isPlayerInFullscreen()) {
-        if (playerContainer) playerContainer.classList.add('is-fullscreen');
-        document.body.classList.add('player-is-fullscreen');
-      }
-      const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
-      if(rw) rw.style.display = 'inline-flex';
-      if(fw) fw.style.display = 'inline-flex';
-      if(cc) cc.style.display = 'inline-flex';
-      statusEl.textContent = `Server ${s.code || s.host || '1'} · Active token (${Math.round((s.expires_in||1800)/60)} min) ${s.cached ? '(cached)' : ''}`;
-
-      // Playback continues uninterrupted; reactive recovery in Hls.Events.ERROR handles token renewals if needed
-      clearTimeout(tokenRefreshTimer);
-
-      attach(playUrl, kind);
+    if(srvBox && currentStreamServers.length > 1){
+      currentStreamServers.forEach((srv, idx) => {
+        const btn = document.createElement('button');
+        const isSelected = (idx === 0);
+        btn.className = 'pill' + (isSelected ? ' active' : '');
+        btn.textContent = srv.label || `Server ${idx + 1}`;
+        btn.style.cssText = 'padding:4px 12px;font-size:12px;cursor:pointer;';
+        btn.onclick = () => activateStreamServer(idx, false);
+        srvBox.appendChild(btn);
+      });
+      srvBox.style.display = 'flex';
+    } else if(srvBox) {
+      srvBox.style.display = 'none';
     }
+
+    activateStreamServer(0, false);
   } catch(err) {
     clearTimeout(slowNoticeTimer);
     clearTimeout(timeoutId);
@@ -5181,6 +5241,7 @@ function attach(url, kind='hls'){
   hls.attachMedia(video);
 
   hls.on(Hls.Events.MANIFEST_PARSED, ()=>{
+    clearPlaybackWatchdog();
     if(keepTime > 1 && targetSeekTime <= 0){
       targetSeekTime = keepTime;
     }
@@ -5189,14 +5250,33 @@ function attach(url, kind='hls'){
   });
 
   hls.on(Hls.Events.LEVEL_LOADED, ()=>{
+    clearPlaybackWatchdog();
     tryApplySeek();
   });
 
+  video.onplaying = ()=>{
+    clearPlaybackWatchdog();
+  };
+
   hls.on(Hls.Events.ERROR, (_, data)=>{
     if(!data) return;
-    // Check if upstream HTTP response returned 401/403/410 (token expiration)
+    // Check if upstream HTTP response returned 401/403/404/410 (token expiration or missing stream)
     const httpStatus = data.response?.code || data.context?.xhr?.status || data.response?.status;
-    if(httpStatus === 401 || httpStatus === 403 || httpStatus === 410){
+    if(httpStatus === 404 || httpStatus === 410){
+      console.warn(`HLS stream resource error (HTTP ${httpStatus})`);
+      if(currentStreamServers && activeStreamServerIndex + 1 < currentStreamServers.length){
+        const nextIdx = activeStreamServerIndex + 1;
+        const nextSrv = currentStreamServers[nextIdx];
+        const nextLabel = (nextSrv?.label || `Server ${nextIdx + 1}`).replace(/\s*\(Recommended\)/, '');
+        showHud(`HLS stream unavailable — switching to ${nextLabel}…`);
+        statusEl.innerHTML = `<span class="spinner"></span> HLS stream unavailable — switching to ${esc(nextLabel)}…`;
+        activateStreamServer(nextIdx, true);
+        return;
+      }
+      selfHeal();
+      return;
+    }
+    if(httpStatus === 401 || httpStatus === 403){
       console.warn(`HLS stream token expired (HTTP ${httpStatus}), triggering self-heal with fresh token...`);
       selfHeal();
       return;
@@ -5211,6 +5291,15 @@ function attach(url, kind='hls'){
       hls.recoverMediaError();
     } else {
       console.warn('HLS fatal error, self-healing...', data);
+      if(currentStreamServers && activeStreamServerIndex + 1 < currentStreamServers.length){
+        const nextIdx = activeStreamServerIndex + 1;
+        const nextSrv = currentStreamServers[nextIdx];
+        const nextLabel = (nextSrv?.label || `Server ${nextIdx + 1}`).replace(/\s*\(Recommended\)/, '');
+        showHud(`HLS stream error — switching to ${nextLabel}…`);
+        statusEl.innerHTML = `<span class="spinner"></span> HLS stream error — switching to ${esc(nextLabel)}…`;
+        activateStreamServer(nextIdx, true);
+        return;
+      }
       selfHeal();
     }
   });
@@ -5249,6 +5338,9 @@ function closePlayer(triggerHistoryBack = true, restoreScroll = true){
   iframeWatchStartTimestamp = 0;
   iframeBaseOffset = 0;
   currentIframeOrigin = null;
+  clearPlaybackWatchdog();
+  currentStreamServers = [];
+  activeStreamServerIndex = 0;
   dismissResumePrompt();
   targetSeekTime = 0;
   activeContentId = null;
@@ -6026,6 +6118,7 @@ window.addEventListener('message', (event) => {
     }
 
     if (hasValidDuration) {
+      clearPlaybackWatchdog();
       iframeDuration = totalDuration;
       iframeHasVerifiedDuration = true;
       if (hasValidCurTime) {

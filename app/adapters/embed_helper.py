@@ -32,27 +32,17 @@ def enrich_stream_servers(
         e = str(episode or (m_tv.group(3) if m_tv and m_tv.group(3) else (m_tv.group(5) if m_tv and m_tv.group(5) else "1")))
         if tid:
             candidate_servers = [
-                {"label": "Server 1 (FilmU - Fast HD)", "url": f"https://embed.filmu.in/tv/{tid}/{s}/{e}"},
-                {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/tv/{tid}/{s}/{e}?autoplay=1&ds_lang=en"},
-                {"label": "Server 3 (Fast UI - HD)", "url": f"https://vidfast.pro/tv/{tid}/{s}/{e}?autoPlay=true"},
-                {"label": "Server 4 (123Embed - Multi)", "url": f"https://play2.123embed.net/tv/{tid}/{s}/{e}"},
-                {"label": "Server 5 (Videasy)", "url": f"https://player.videasy.to/tv/{tid}/{s}/{e}"},
-                {"label": "Server 6 (VidCore)", "url": f"https://vidcore.org/embed/tv/{tid}/{s}/{e}"},
-                {"label": "Server 7 (VidSrc - Fast)", "url": f"https://vidsrc.pm/embed/tv/{tid}/{s}/{e}"},
-                {"label": "Server 8 (2Embed - HD)", "url": f"https://www.2embed.cc/embedtv/{tid}&s={s}&e={e}"},
-                {"label": "Server 9 (VidUp)", "url": f"https://vidup.to/tv/{tid}/{s}/{e}?autoPlay=true"},
+                {"label": "Server 1 (FilmU - Fast HD) (Recommended)", "url": f"https://embed.filmu.in/tv/{tid}/{s}/{e}", "kind": "iframe"},
+                {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/tv/{tid}/{s}/{e}?autoplay=1&ds_lang=en", "kind": "iframe"},
+                {"label": "Server 3 (Fast UI - HD)", "url": f"https://vidfast.pro/tv/{tid}/{s}/{e}?autoPlay=true", "kind": "iframe"},
+                {"label": "Server 4 (123Embed - Multi)", "url": f"https://play2.123embed.net/tv/{tid}/{s}/{e}", "kind": "iframe"},
             ]
     elif tid:
         candidate_servers = [
-            {"label": "Server 1 (FilmU - Fast HD)", "url": f"https://embed.filmu.in/movie/{tid}"},
-            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/movie/{tid}?autoplay=1&ds_lang=en"},
-            {"label": "Server 3 (Fast UI - HD)", "url": f"https://vidfast.pro/movie/{tid}?autoPlay=true"},
-            {"label": "Server 4 (123Embed - Multi)", "url": f"https://play2.123embed.net/movie/{tid}"},
-            {"label": "Server 5 (Videasy)", "url": f"https://player.videasy.to/movie/{tid}"},
-            {"label": "Server 6 (VidCore)", "url": f"https://vidcore.org/embed/movie/{tid}"},
-            {"label": "Server 7 (VidSrc - Fast)", "url": f"https://vidsrc.pm/embed/movie/{tid}"},
-            {"label": "Server 8 (2Embed - HD)", "url": f"https://www.2embed.cc/embed/{tid}"},
-            {"label": "Server 9 (VidUp)", "url": f"https://vidup.to/movie/{tid}?autoPlay=true"},
+            {"label": "Server 1 (FilmU - Fast HD) (Recommended)", "url": f"https://embed.filmu.in/movie/{tid}", "kind": "iframe"},
+            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/movie/{tid}?autoplay=1&ds_lang=en", "kind": "iframe"},
+            {"label": "Server 3 (Fast UI - HD)", "url": f"https://vidfast.pro/movie/{tid}?autoPlay=true", "kind": "iframe"},
+            {"label": "Server 4 (123Embed - Multi)", "url": f"https://play2.123embed.net/movie/{tid}", "kind": "iframe"},
         ]
 
     def _existing_rank(srv: dict | str) -> int:
@@ -64,20 +54,12 @@ def enrich_stream_servers(
             return 1
         if "vidfast" in u or "fast ui" in lbl:
             return 2
-        if "vidup" in u:
-            return 3
-        if "vidrock" in u:
-            return 4
         if "123embed" in u:
+            return 3
+        if "vidup" in u:
+            return 4
+        if "vidrock" in u:
             return 5
-        if "videasy" in u:
-            return 6
-        if "vidcore" in u:
-            return 7
-        if "2embed" in u:
-            return 8
-        if "vidsrc.pm" in u or "vidsrc.mov" in u or "vidsrc.fyi" in u:
-            return 9
         return 10
 
     def _adjust_ep(u: str) -> str:
@@ -99,7 +81,7 @@ def enrich_stream_servers(
         all_servers.append(srv)
     # 3. Primary url if present
     if primary_url:
-        all_servers.append({"label": "Primary", "url": primary_url})
+        all_servers.append({"label": "Primary", "url": primary_url, "kind": "iframe"})
 
     # Sort all servers so FilmU is ALWAYS index 0, and VIP-no ADS is ALWAYS index 1
     all_servers.sort(key=_existing_rank)
@@ -107,11 +89,14 @@ def enrich_stream_servers(
     seen_urls = set()
     final_servers = []
 
+    # Exclude dead/ad-heavy hosts
+    disallowed_hosts = ("vidlink.pro", "videasy.to", "vidcore.org", "vidsrc.pm", "2embed.cc", "primesrc.me")
+
     for srv in all_servers:
         u = srv.get("url") if isinstance(srv, dict) else srv
         if u:
             u = _adjust_ep(u)
-        if u and u not in seen_urls and "vidlink.pro" not in u:
+        if u and u not in seen_urls and not any(dh in u.lower() for dh in disallowed_hosts):
             seen_urls.add(u)
             lbl = srv.get("label") if isinstance(srv, dict) else ""
             u_lower = u.lower()
@@ -123,21 +108,22 @@ def enrich_stream_servers(
                 srv_name = "Fast UI - HD"
             elif "123embed" in u_lower:
                 srv_name = "123Embed - Multi"
-            elif "videasy" in u_lower:
-                srv_name = "Videasy"
-            elif "vidcore" in u_lower:
-                srv_name = "VidCore"
-            elif "vidsrc.pm" in u_lower:
-                srv_name = "VidSrc - Fast"
-            elif "2embed" in u_lower:
-                srv_name = "2Embed - HD"
             elif "vidup" in u_lower:
                 srv_name = "VidUp"
+            elif "vidrock" in u_lower:
+                srv_name = "VidRock"
             elif "(" in lbl:
                 srv_name = lbl.split("(", 1)[-1].rstrip(")")
             else:
                 srv_name = lbl or "HD"
-            final_servers.append({"label": f"Server {len(final_servers)+1} ({srv_name})", "url": u})
+
+            idx = len(final_servers) + 1
+            rec_tag = " (Recommended)" if idx == 1 else ""
+            final_servers.append({
+                "label": f"Server {idx} ({srv_name}){rec_tag}",
+                "url": u,
+                "kind": srv.get("kind", "iframe") if isinstance(srv, dict) else "iframe",
+            })
 
     main_url = final_servers[0]["url"] if final_servers else primary_url
     return main_url, final_servers

@@ -117,45 +117,121 @@ def _dooflix_embed_url(tmdb_id: str, title: str, is_series: bool, season: int | 
     return f"https://embed.filmu.in/tv/{tmdb_id}/{season_no}/{episode_no}"
 
 
-def _prioritize_dooflix_servers(servers: list[dict]) -> tuple[str, list[dict]]:
-    """Prefer verified fast reachable providers: FilmU first, VIP - No ADS second."""
-    priority = (
-        "filmu",
-        "vip - no ads",
-        "vidsrc.si",
-        "fast ui - hd",
-        "vidfast.pro",
-        "vidup.to",
-        "vidrock",
-        "123embed",
-        "videasy",
-        "vidcore",
-        "vidsrc",
-        "2embed",
-    )
+def _prioritize_stream_servers(servers: list[dict], source: str = "") -> tuple[str, list[dict]]:
+    """Prioritize servers based on source provider and verified reliability:
+    1. FilmU - Fast HD is ALWAYS Server 1 (Default / Recommended) for Movies7, DuoFlix, Ask4Movies,
+       and YoMovies iframe fallback.
+    2. VIP - No ADS is ALWAYS Server 2 (Second default) across all tags.
+    3. For native YoMovies Speedostream HLS: Speedostream HLS is Server 1 (Recommended),
+       FilmU is Server 2, and VIP - No ADS is Server 3.
+    4. Provider-native fast fallbacks (Fast UI, Cinesrc, 111Movies, Ask4 dynamic mirrors) follow.
+    """
+    if not servers:
+        return "", []
 
     def rank(server: dict) -> int:
-        haystack = f"{server.get('label', '')} {server.get('url', '')}".lower()
-        return next((index for index, token in enumerate(priority) if token in haystack), len(priority))
+        lbl = (server.get("label") or "").lower()
+        u = (server.get("url") or "").lower()
+        k = (server.get("kind") or "").lower()
+        haystack = f"{lbl} {u} {k}"
+
+        has_native_hls = any(
+            ("speedo" in (s.get("label", "") + s.get("url", "")).lower() or "/proxy/hls" in (s.get("url", "") or "").lower())
+            for s in servers
+        )
+
+        # For YoMovies with native HLS: Speedostream is #0, FilmU is #1, VIP is #2
+        if source == "yomovies" and has_native_hls:
+            if "speedo" in haystack or "/proxy/hls" in u:
+                return 0
+            if "filmu" in haystack:
+                return 1
+            if "vip" in haystack or "vidsrc.si" in haystack:
+                return 2
+            return 3
+
+        # For all other tags (and YoMovies without HLS): FilmU is #0, VIP is #1
+        if "filmu" in haystack:
+            return 0
+        if "vip" in haystack or "vidsrc.si" in haystack:
+            return 1
+        if "fast ui" in haystack or "vidfast" in haystack:
+            return 2
+        if "cinesrc" in haystack:
+            return 3
+        if "111movies" in haystack:
+            return 4
+        if "123embed" in haystack:
+            return 5
+        if "vidup" in haystack:
+            return 6
+        if "vidrock" in haystack:
+            return 7
+        return 10
 
     ordered = sorted(servers, key=rank)
     relabeled = []
-    for i, srv in enumerate(ordered):
-        lbl = srv.get("label", "")
-        u = srv.get("url", "")
+    seen_urls = set()
+    disallowed_hosts = ("vidlink.pro", "videasy.to", "vidcore.org", "vidsrc.pm", "2embed.cc", "primesrc.me")
+
+    for srv in ordered:
+        u = srv.get("url") or ""
+        if not u or u in seen_urls:
+            continue
         u_lower = u.lower()
-        if "filmu" in u_lower:
+        if any(dh in u_lower for dh in disallowed_hosts):
+            continue
+        seen_urls.add(u)
+
+        lbl = srv.get("label") or ""
+        lbl_lower = lbl.lower()
+        k = srv.get("kind") or ("hls" if ("/proxy/hls" in u_lower or "speedo" in u_lower) else "iframe")
+
+        if "speedo" in u_lower or "speedo" in lbl_lower or "/proxy/hls" in u_lower:
+            srv_name = "Speedostream HLS"
+            k = "hls"
+        elif "filmu" in u_lower:
             srv_name = "FilmU - Fast HD"
-        elif "vidsrc.si" in u_lower or "vip" in lbl.lower():
+            k = "iframe"
+        elif "vidsrc.si" in u_lower or "vip" in lbl_lower:
             srv_name = "VIP - No ADS"
-        elif "vidfast" in u_lower or "fast ui" in lbl.lower():
+            k = "iframe"
+        elif "vidfast" in u_lower or "fast ui" in lbl_lower:
             srv_name = "Fast UI - HD"
+            k = "iframe"
+        elif "cinesrc" in u_lower or "cinesrc" in lbl_lower:
+            srv_name = "Cinesrc - HD"
+            k = "iframe"
+        elif "111movies" in u_lower:
+            srv_name = "111Movies - Multi"
+            k = "iframe"
+        elif "123embed" in u_lower:
+            srv_name = "123Embed - Multi"
+            k = "iframe"
+        elif "vidup" in u_lower:
+            srv_name = "VidUp"
+            k = "iframe"
+        elif "vidrock" in u_lower:
+            srv_name = "VidRock"
+            k = "iframe"
         elif "(" in lbl:
-            srv_name = lbl.split("(", 1)[-1].rstrip(")")
+            clean_lbl = re.sub(r"\s*\(Recommended\)", "", lbl, flags=re.I).strip()
+            srv_name = clean_lbl.split("(", 1)[-1].rstrip(")").strip()
+            if ")" in srv_name:
+                srv_name = srv_name.split(")")[0].strip()
         else:
-            srv_name = lbl or "HD"
-        relabeled.append({"label": f"Server {i+1} ({srv_name})", "url": u})
-    return (relabeled[0]["url"] if relabeled else ""), relabeled
+            srv_name = re.sub(r"\s*\(Recommended\)", "", lbl, flags=re.I).strip() or "HD"
+
+        idx = len(relabeled) + 1
+        rec_tag = " (Recommended)" if idx == 1 else ""
+        relabeled.append({
+            "label": f"Server {idx} ({srv_name}){rec_tag}",
+            "url": u,
+            "kind": k,
+        })
+
+    main_url = relabeled[0]["url"] if relabeled else ""
+    return main_url, relabeled
 
 
 @router.get("/api/stream/{movie_id}")
@@ -246,8 +322,7 @@ def stream(
                 season=s_num,
                 episode=e_num,
             )
-            if source == "dooflix":
-                main_url, servers = _prioritize_dooflix_servers(servers)
+            main_url, servers = _prioritize_stream_servers(servers, source=source)
             return {
                 "kind": "iframe",
                 "url": main_url,
@@ -306,8 +381,7 @@ def stream(
         p_url = row["player_url"]
         if p_kind == "iframe" and source != "movies7":
             p_url, servers = enrich_stream_servers(p_url, is_series=is_series_record, existing_servers=servers, tmdb_id=str(row["tmdb_id"] or ""))
-            if source == "dooflix":
-                p_url, servers = _prioritize_dooflix_servers(servers)
+        p_url, servers = _prioritize_stream_servers(servers or ([{"label": "Server 1", "url": p_url, "kind": p_kind}] if p_url else []), source=source)
 
         return {
             "kind": p_kind,
@@ -386,7 +460,7 @@ def stream(
         if tmdb_id:
             dummy_url = _dooflix_embed_url(str(tmdb_id), row["title"], doo_is_series)
             main_url, servers = enrich_stream_servers(dummy_url, is_series=doo_is_series, tmdb_id=str(tmdb_id))
-            main_url, servers = _prioritize_dooflix_servers(servers)
+            main_url, servers = _prioritize_stream_servers(servers, source="dooflix")
             now = int(time.time())
             _persist_catalog_update(
                 "UPDATE movies SET player_url=?, player_kind='iframe', servers_json=?, resolved_at=? WHERE id=?",
@@ -425,8 +499,7 @@ def stream(
             is_series = doo_is_series if source == "dooflix" else bool(row["is_series"])
             dummy_url = f"https://embed.filmu.in/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "")
             main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
-            if source == "dooflix":
-                main_url, servers = _prioritize_dooflix_servers(servers)
+            main_url, servers = _prioritize_stream_servers(servers, source=source)
             from ..adapters.base import StreamInfo
             info = StreamInfo(kind="iframe", url=main_url, servers=servers)
         elif source == "ask4movie" and detail_url:
@@ -465,8 +538,7 @@ def stream(
                 else f"https://embed.filmu.in/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "")
             )
             main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
-            if source == "dooflix":
-                main_url, servers = _prioritize_dooflix_servers(servers)
+            main_url, servers = _prioritize_stream_servers(servers, source=source)
             now = int(time.time())
             _persist_catalog_update(
                 "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
@@ -498,8 +570,7 @@ def stream(
                     existing_servers=servers,
                     tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
                 )
-                if source == "dooflix":
-                    p_url, servers = _prioritize_dooflix_servers(servers)
+            p_url, servers = _prioritize_stream_servers(servers or ([{"label": "Server 1", "url": p_url, "kind": p_kind}] if p_url else []), source=source)
             return {
                 "kind": p_kind,
                 "url": p_url,
@@ -520,8 +591,7 @@ def stream(
             existing_servers=info.servers,
             tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
         )
-        if source == "dooflix":
-            info.url, info.servers = _prioritize_dooflix_servers(info.servers)
+    info.url, info.servers = _prioritize_stream_servers(info.servers or ([{"label": "Server 1", "url": info.url, "kind": info.kind}] if info.url else []), source=source)
 
     now = int(time.time())
     _persist_catalog_update(
