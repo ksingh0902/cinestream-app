@@ -885,6 +885,189 @@ option {
   color: #fff;
 }
 
+/* Next Episode Popup Overlay */
+dialog.next-ep-popup,
+.next-ep-popup {
+  position: absolute;
+  bottom: 84px;
+  right: 24px;
+  left: auto;
+  top: auto;
+  margin: 0;
+  width: auto;
+  height: auto;
+  z-index: 2147483646;
+  background: rgba(15, 17, 23, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.88), 0 0 20px rgba(234, 88, 12, 0.2);
+  pointer-events: auto !important;
+  user-select: none;
+  animation: nextEpSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 440px;
+}
+
+dialog.next-ep-popup::backdrop,
+.next-ep-popup::backdrop {
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+@keyframes nextEpSlideIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+:fullscreen .next-ep-popup,
+:-webkit-full-screen .next-ep-popup,
+:-moz-full-screen .next-ep-popup,
+#player-container:fullscreen .next-ep-popup,
+#player-container:-webkit-full-screen .next-ep-popup,
+#player-container:-moz-full-screen .next-ep-popup,
+.player-container.is-fullscreen .next-ep-popup,
+body.player-is-fullscreen .next-ep-popup,
+dialog.next-ep-popup[open],
+.next-ep-popup:popover-open {
+  position: fixed !important;
+  inset: auto 32px 96px auto !important;
+  bottom: 96px !important;
+  right: 32px !important;
+  left: auto !important;
+  top: auto !important;
+  margin: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(15, 17, 23, 0.96) !important;
+  color: #fff !important;
+  padding: 12px 16px !important;
+  overflow: visible !important;
+  z-index: 2147483646 !important;
+  display: flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.player-container.fs-idle .next-ep-popup {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.next-ep-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.next-ep-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #ea580c;
+  text-transform: uppercase;
+}
+
+.next-ep-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.next-ep-meta {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.next-ep-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-next-ep-play {
+  background: #ea580c;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.btn-next-ep-play:hover {
+  background: #f97316;
+  transform: translateY(-1px);
+}
+
+.btn-next-ep-play:active {
+  transform: translateY(0);
+}
+
+.btn-next-ep-play:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-next-ep-dismiss {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-next-ep-dismiss:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .next-ep-popup,
+  dialog.next-ep-popup[open],
+  .next-ep-popup:popover-open {
+    inset: auto 12px 16px 12px !important;
+    bottom: 16px !important;
+    left: 12px !important;
+    right: 12px !important;
+    max-width: none !important;
+    padding: 10px 12px !important;
+  }
+  .next-ep-title {
+    max-width: 150px;
+    font-size: 13px;
+  }
+  .btn-next-ep-play {
+    padding: 7px 11px;
+    font-size: 12px;
+  }
+}
+
 
 /* Device Viewing History Info Modal */
 .cw-modal {
@@ -2430,6 +2613,24 @@ body.watch-page .syn { margin:0; line-height:1.65; }
           <button class="btn-resume-close" onclick="dismissResumePrompt()" title="Dismiss" tabindex="0">&times;</button>
         </div>
       </div>
+      <!-- Next Episode Overlay Popup -->
+      <dialog id="next-ep-popup" class="next-ep-popup" style="display:none;" role="dialog" aria-label="Next Episode">
+        <div class="next-ep-thumb" id="next-ep-thumb" style="display:none;">
+          <img id="next-ep-thumb-img" src="" alt="Thumbnail" />
+        </div>
+        <div class="next-ep-details">
+          <div class="next-ep-badge">NEXT EPISODE</div>
+          <div class="next-ep-title" id="next-ep-title"></div>
+          <div class="next-ep-meta" id="next-ep-meta">Playing next</div>
+        </div>
+        <div class="next-ep-actions">
+          <button id="btn-next-ep-play" class="btn-next-ep-play" onclick="triggerPlayNextEpisode(event)" tabindex="0" title="Play Next Episode">
+            <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+            <span id="btn-next-ep-text">Play Next</span>
+          </button>
+          <button class="btn-next-ep-dismiss" onclick="dismissNextEpisodePopup(event)" tabindex="0" title="Dismiss (✕)">&times;</button>
+        </div>
+      </dialog>
     </div>
     <div id="alt-source-wrap" style="display:none;margin-top:8px;font-size:12.5px;color:var(--dim);"></div>
     <div class="status-wrap">
@@ -2931,6 +3132,8 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
           hasNext: true,
           season: sNum,
           episode: nextEp.num,
+          movieId: nextEp.movie_id || nextEp.id || null,
+          name: nextEp.name || nextEp.title || '',
           isFinalOfSeries: false
         };
       }
@@ -2956,10 +3159,13 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
           .sort((a, b) => a.num - b.num);
 
         if (nextSeasonEps.length > 0) {
+          const firstEp = nextSeasonEps[0];
           return {
             hasNext: true,
             season: nextSeasonObj.sNum,
-            episode: nextSeasonEps[0].num, // smallest valid episode number in that season
+            episode: firstEp.num, // smallest valid episode number in that season
+            movieId: firstEp.movie_id || firstEp.id || null,
+            name: firstEp.name || firstEp.title || '',
             isFinalOfSeries: false
           };
         }
@@ -2983,15 +3189,19 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
       hasNext: false,
       season: sNum,
       episode: eNum,
+      movieId: null,
+      name: '',
       isFinalOfSeries: isConfirmedEnded
     };
   }
 
-  // Fallback when catalogue season tree is not available: assume next episode in sequence exists
+  // Fallback when catalogue season tree is not available: strictly return hasNext: false (never assume eNum + 1)
   return {
-    hasNext: true,
+    hasNext: false,
     season: sNum,
-    episode: eNum + 1,
+    episode: eNum,
+    movieId: null,
+    name: '',
     isFinalOfSeries: false
   };
 }
@@ -3535,7 +3745,66 @@ function savePlaybackProgress(force = false) {
   renderContinueWatching();
 }
 
-function checkAndTriggerNextEp() {}
+let shownNextEpPopupKey = '';
+let dismissedNextEpPopupKey = '';
+let isNextEpTransitioning = false;
+let isPreservingEpisodeFullscreen = false;
+let episodeFsPreserveTimer = null;
+
+function checkAndTriggerNextEp() {
+  // 1. Only eligible for web series
+  if (!activeContentId || !activeContentId.startsWith('series_')) {
+    dismissNextEpisodePopup();
+    return;
+  }
+  if (!activeSeasonNum || !activeEpisodeNum) return;
+
+  // 2. Extract verified playback telemetry
+  let duration = null;
+  let currentTime = 0;
+
+  if (video && video.style.display !== 'none' && video.readyState >= 1 && !isNaN(video.duration) && video.duration > 0) {
+    // Native HTML5 video (YoMovies, DuoFlix native HLS)
+    duration = video.duration;
+    currentTime = video.currentTime || 0;
+  } else if (pIframe && pIframe.style.display !== 'none' && iframeHasVerifiedDuration && Number.isFinite(iframeDuration) && iframeDuration > 0) {
+    // Embed iframe telemetry: only if duration is genuinely verified
+    duration = iframeDuration;
+    currentTime = iframeCurrentTime || 0;
+  } else {
+    // Missing or unverified duration: strictly suppress popup
+    return;
+  }
+
+  // 3. Verify threshold rules
+  const REMAINING_THRESHOLD = 180; // 3 minutes
+  const remaining = duration - currentTime;
+
+  let isEligible = false;
+  if (duration > REMAINING_THRESHOLD) {
+    isEligible = remaining > 0 && remaining <= REMAINING_THRESHOLD && currentTime >= 5;
+  } else {
+    // Short episodes (duration <= 180s): trigger when >= 50% elapsed and remaining > 0
+    isEligible = currentTime >= (duration * 0.5) && remaining > 0 && currentTime >= 5;
+  }
+
+  if (!isEligible) return;
+
+  // 4. Session key validation
+  const canonId = getCanonicalSeriesId(currentSeriesData, curId, currentSeriesData);
+  const epKey = `series_${canonId}_s${activeSeasonNum}_e${activeEpisodeNum}`;
+
+  if (shownNextEpPopupKey === epKey || dismissedNextEpPopupKey === epKey) {
+    return;
+  }
+
+  // 5. Discover verified next episode
+  const next = getNextEpisode();
+  if (!next) return;
+
+  // 6. Display popup
+  showNextEpisodePopup(next, epKey);
+}
 
 // Attach playback progress listeners to video element
 video.addEventListener('timeupdate', () => {
@@ -4173,6 +4442,7 @@ function setIframeSrc(url){
 
 async function openPlayer(id, targetSeason = null, targetEpisode = null){
   const wasWatching = document.body.classList.contains('watch-page');
+  const wasInFullscreen = isPlayerInFullscreen() || isPreservingEpisodeFullscreen;
   if(!wasWatching) homeScrollY = window.scrollY || 0;
   curId = id;
   lastProgressSaveTime = 0;
@@ -4229,8 +4499,12 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   }
   dismissResumePrompt();
   dismissNextEpisodeToast(false);
+  dismissNextEpisodePopup();
   nextEpPromptKey = '';
   dismissedNextEpPromptKey = '';
+  shownNextEpPopupKey = '';
+  dismissedNextEpPopupKey = '';
+  isNextEpTransitioning = false;
   
 
   // Reset Seasons UI
@@ -4256,16 +4530,25 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   document.documentElement.classList.remove('modal-open');
   document.body.classList.remove('modal-open');
   document.body.classList.add('watch-page');
+  if (wasInFullscreen) {
+    isPreservingEpisodeFullscreen = true;
+    document.body.classList.add('player-is-fullscreen');
+    if (playerContainer) playerContainer.classList.add('is-fullscreen');
+  }
   const scrollBtn = document.getElementById('btn-scroll-episodes');
   if(scrollBtn) scrollBtn.style.display = 'none';
 
   overlay.classList.add('on');
-  window.scrollTo({top: 0, behavior: 'auto'});
+  if (!wasInFullscreen) {
+    window.scrollTo({top: 0, behavior: 'auto'});
+  }
   updateFullscreenBtn();
-  setTimeout(()=>{
-    const firstBtn = document.querySelector('#overlay .btn-close') || document.querySelector('#overlay .btn-group button');
-    if(firstBtn && typeof firstBtn.focus === 'function') firstBtn.focus();
-  }, 120);
+  if (!wasInFullscreen) {
+    setTimeout(()=>{
+      const firstBtn = document.querySelector('#overlay .btn-close') || document.querySelector('#overlay .btn-group button');
+      if(firstBtn && typeof firstBtn.focus === 'function') firstBtn.focus();
+    }, 120);
+  }
   // Push state to browser history so TV remote Back / Exit button closes the player instead of closing website
   const watchHash = `#watch/${id}`;
   if(!wasWatching && window.location.hash !== watchHash){
@@ -4284,7 +4567,7 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   if(hls){ hls.destroy(); hls = null; }
   video.removeAttribute('src'); video.load();
   if(pIframe){
-    pIframe.style.display = 'none';
+    if(!wasInFullscreen) pIframe.style.display = 'none';
     setIframeSrc('about:blank');
   }
 
@@ -4396,6 +4679,136 @@ let nextEpCountdownTimer = null;
 let nextEpSecondsLeft = 5;
 let nextEpPromptKey = '';
 let dismissedNextEpPromptKey = '';
+
+function getNextEpisode() {
+  if (!currentSeriesData || !Array.isArray(currentSeriesData.seasons) || currentSeriesData.seasons.length === 0) {
+    return null;
+  }
+  const canonId = getCanonicalSeriesId(currentSeriesData, curId, currentSeriesData);
+  const info = getNextEpisodeInfo(canonId, activeSeasonNum, activeEpisodeNum, currentSeriesData);
+  if (!info || !info.hasNext || !info.season || !info.episode) {
+    return null;
+  }
+  const sPad = String(info.season).padStart(2, '0');
+  const ePad = String(info.episode).padStart(2, '0');
+  const epLabel = `S${sPad} E${ePad}`;
+  const epName = info.name || `Episode ${info.episode}`;
+  return {
+    season: info.season,
+    episode: info.episode,
+    movieId: info.movieId || curId,
+    name: epName,
+    label: epLabel,
+    fullTitle: `${epLabel}${epName ? ' · ' + epName : ''}`
+  };
+}
+
+function showNextEpisodePopup(next, epKey) {
+  const popup = document.getElementById('next-ep-popup');
+  if (!popup) return;
+
+  const titleEl = document.getElementById('next-ep-title');
+  const metaEl = document.getElementById('next-ep-meta');
+  const playBtn = document.getElementById('btn-next-ep-play');
+  const btnText = document.getElementById('btn-next-ep-text');
+
+  if (titleEl) titleEl.textContent = next.fullTitle || next.label;
+  if (metaEl) metaEl.textContent = `Up next in ${next.label}`;
+  if (playBtn) playBtn.disabled = false;
+  if (btnText) btnText.textContent = 'Play Next';
+
+  popup.style.display = 'flex';
+  const isFs = isPlayerInFullscreen();
+  if (isFs && typeof popup.showModal === 'function') {
+    try {
+      if (!popup.open) popup.showModal();
+    } catch (_) {}
+  }
+  shownNextEpPopupKey = epKey;
+}
+
+function dismissNextEpisodePopup(event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const popup = document.getElementById('next-ep-popup');
+  if (popup) {
+    popup.style.display = 'none';
+    if (typeof popup.close === 'function') {
+      try {
+        if (popup.open) popup.close();
+      } catch (_) {}
+    }
+    if (typeof popup.hidePopover === 'function') {
+      try {
+        popup.hidePopover();
+      } catch (_) {}
+    }
+  }
+  if (shownNextEpPopupKey) {
+    dismissedNextEpPopupKey = shownNextEpPopupKey;
+  }
+}
+
+async function triggerPlayNextEpisode(event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  if (isNextEpTransitioning) return;
+  isNextEpTransitioning = true;
+
+  // Preserve fullscreen state across episode transition
+  const wasInFullscreen = isPlayerInFullscreen() || isPreservingEpisodeFullscreen;
+  if (wasInFullscreen) {
+    isPreservingEpisodeFullscreen = true;
+    clearTimeout(episodeFsPreserveTimer);
+    if (playerContainer) playerContainer.classList.add('is-fullscreen');
+    document.body.classList.add('player-is-fullscreen');
+    const target = playerContainer;
+    const req = target ? (target.requestFullscreen || target.webkitRequestFullscreen || target.mozRequestFullScreen || target.msRequestFullscreen) : null;
+    if (req) {
+      try {
+        const p = req.call(target);
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {}
+    }
+  }
+
+  const playBtn = document.getElementById('btn-next-ep-play');
+  const btnText = document.getElementById('btn-next-ep-text');
+  if (playBtn) playBtn.disabled = true;
+  if (btnText) btnText.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Loading…';
+
+  const next = getNextEpisode();
+  if (!next) {
+    dismissNextEpisodePopup();
+    isNextEpTransitioning = false;
+    isPreservingEpisodeFullscreen = false;
+    return;
+  }
+
+  // 1. Save progress of current episode
+  savePlaybackProgress(true);
+
+  // 2. Hide popup
+  dismissNextEpisodePopup();
+
+  // 3. Seamlessly transition to next episode (preserves fullscreen)
+  await selectEpisodeChip(next.season, next.episode, next.movieId);
+
+  if (wasInFullscreen && playerContainer) {
+    playerContainer.classList.add('is-fullscreen');
+    document.body.classList.add('player-is-fullscreen');
+    updateFullscreenBtn();
+  }
+
+  isNextEpTransitioning = false;
+  episodeFsPreserveTimer = setTimeout(() => {
+    isPreservingEpisodeFullscreen = false;
+  }, 5000);
+}
 
 function getNextEpisodeKey(next = getNextEpisode()){
   return next ? `${activeSeasonNum}:${activeEpisodeNum}->${next.season}:${next.episode}` : '';
@@ -4542,11 +4955,29 @@ function selectSeasonTab(seasonNum){
 }
 
 async function selectEpisodeChip(sNum, eNum, epMovieId){
+  const wasInFullscreen = isPlayerInFullscreen() || isPreservingEpisodeFullscreen;
+  if (wasInFullscreen) {
+    isPreservingEpisodeFullscreen = true;
+    if (playerContainer) playerContainer.classList.add('is-fullscreen');
+    document.body.classList.add('player-is-fullscreen');
+    if (!document.fullscreenElement && playerContainer) {
+      const req = playerContainer.requestFullscreen || playerContainer.webkitRequestFullscreen || playerContainer.mozRequestFullScreen || playerContainer.msRequestFullscreen;
+      if (req) {
+        try {
+          const p = req.call(playerContainer);
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+      }
+    }
+  }
   savePlaybackProgress(true);
   stopIframeWatchTracker();
   dismissNextEpisodeToast(false);
+  dismissNextEpisodePopup();
   nextEpPromptKey = '';
   dismissedNextEpPromptKey = '';
+  shownNextEpPopupKey = '';
+  dismissedNextEpPopupKey = '';
   currentPlaybackSessionId = ++playbackSessionCounter;
   activeIframeContentId = null;
   activeIframeSessionId = 0;
@@ -4588,7 +5019,7 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
     }
   }
 
-  if(epMovieId && epMovieId !== curId){
+  if(epMovieId && String(epMovieId) !== String(curId)){
     openPlayer(epMovieId, sNum, eNum);
   } else {
     statusEl.innerHTML = `<span class="spinner"></span> Playing Season ${sNum} Episode ${eNum}…`;
@@ -4663,6 +5094,10 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
           targetSeekTime = 0;
         }
       }
+      if (isPreservingEpisodeFullscreen || isPlayerInFullscreen()) {
+        if (playerContainer) playerContainer.classList.add('is-fullscreen');
+        document.body.classList.add('player-is-fullscreen');
+      }
       startIframeWatchTracker();
       checkAndTriggerNextEp();
       const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
@@ -4707,6 +5142,10 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       }
       if(srvBox) srvBox.style.display = 'none';
       video.style.display = 'block';
+      if (isPreservingEpisodeFullscreen || isPlayerInFullscreen()) {
+        if (playerContainer) playerContainer.classList.add('is-fullscreen');
+        document.body.classList.add('player-is-fullscreen');
+      }
       const rw = document.getElementById('btn-rewind'), fw = document.getElementById('btn-forward'), cc = document.getElementById('btn-cc');
       if(rw) rw.style.display = 'inline-flex';
       if(fw) fw.style.display = 'inline-flex';
@@ -4839,8 +5278,14 @@ function attach(url, kind='hls'){
 function closePlayer(triggerHistoryBack = true, restoreScroll = true){
   const wasPlayerOpen = !!((overlay && overlay.classList.contains('on')) || document.body.classList.contains('watch-page'));
   dismissNextEpisodeToast(false);
+  dismissNextEpisodePopup();
   nextEpPromptKey = '';
   dismissedNextEpPromptKey = '';
+  shownNextEpPopupKey = '';
+  dismissedNextEpPopupKey = '';
+  isNextEpTransitioning = false;
+  isPreservingEpisodeFullscreen = false;
+  clearTimeout(episodeFsPreserveTimer);
   
   const fsTopBar = document.getElementById('fs-top-bar');
   if(fsTopBar){ fsTopBar.style.display = 'none'; fsTopBar.classList.remove('fs-visible'); }
@@ -4992,11 +5437,15 @@ function isPlayerInFullscreen(){
     document.mozFullScreenElement ||
     document.msFullscreenElement ||
     (video && video.webkitDisplayingFullscreen) ||
+    isPreservingEpisodeFullscreen ||
     (playerContainer && (playerContainer.classList.contains('is-fullscreen') || playerContainer.classList.contains('fullscreen')))
   );
 }
 
 function togglePlayerFullscreen(){
+  isPreservingEpisodeFullscreen = false;
+  isNextEpTransitioning = false;
+  clearTimeout(episodeFsPreserveTimer);
   const isFs = isPlayerInFullscreen();
   if(isFs){
     // Exit fullscreen
@@ -5047,6 +5496,8 @@ function togglePlayerFullscreen(){
 }
 function toggleAskFullscreen(){ togglePlayerFullscreen(); }
 
+let fsPromotionPending = false;
+
 function handleFsStateChange(){
   const fsElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
   const isFs = !!fsElement;
@@ -5054,11 +5505,46 @@ function handleFsStateChange(){
   if(isFs){
     document.body.classList.add('player-is-fullscreen');
     if(playerContainer) playerContainer.classList.add('is-fullscreen');
+
+    // Ensure Next Episode popup renders in browser Top Layer if currently active
+    const popup = document.getElementById('next-ep-popup');
+    if(popup && popup.style.display === 'flex' && typeof popup.showModal === 'function'){
+      try {
+        if (!popup.open) popup.showModal();
+        else {
+          popup.close();
+          popup.showModal();
+        }
+      } catch(_){}
+    }
   } else {
+    // If we are actively preserving fullscreen across an episode transition, keep container in fullscreen!
+    if (isPreservingEpisodeFullscreen || isNextEpTransitioning) {
+      if (playerContainer) playerContainer.classList.add('is-fullscreen');
+      document.body.classList.add('player-is-fullscreen');
+      updateFullscreenBtn();
+      const fsTopBar = document.getElementById('fs-top-bar');
+      if (fsTopBar) {
+        fsTopBar.style.display = 'flex';
+        fsTopBar.classList.add('fs-visible');
+      }
+      return;
+    }
+
+    fsPromotionPending = false;
     document.body.classList.remove('player-is-fullscreen');
     if(playerContainer){
       playerContainer.classList.remove('is-fullscreen');
       playerContainer.classList.remove('fs-idle');
+    }
+    const popup = document.getElementById('next-ep-popup');
+    if(popup && typeof popup.close === 'function' && popup.open){
+      try {
+        popup.close();
+        if (shownNextEpPopupKey && dismissedNextEpPopupKey !== shownNextEpPopupKey) {
+          popup.style.display = 'flex';
+        }
+      } catch(_){}
     }
   }
 
@@ -5680,6 +6166,7 @@ window.addEventListener('message', (event) => {
     // 7. Save playback progress if verified
     if (iframeHasVerifiedDuration && iframeCurrentTime >= 5) {
       savePlaybackProgress(false);
+      checkAndTriggerNextEp();
     }
 
     // 8. Completed verification
@@ -5696,6 +6183,20 @@ window.addEventListener('message', (event) => {
     }
   } catch (_) {}
 });
+
+// Next Episode popup click isolation to prevent pausing video
+(function initNextEpPopupListeners() {
+  const popup = document.getElementById('next-ep-popup');
+  if (popup) {
+    popup.addEventListener('click', (e) => { e.stopPropagation(); });
+    popup.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+    popup.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    popup.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      dismissNextEpisodePopup();
+    });
+  }
+})();
 
 /* TV Remote D-Pad Navigation & Smooth Scroll System */
 window._isDpadNavigating = false;

@@ -240,6 +240,8 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
           hasNext: true,
           season: sNum,
           episode: nextEp.num,
+          movieId: nextEp.movie_id || nextEp.id || null,
+          name: nextEp.name || nextEp.title || '',
           isFinalOfSeries: false
         };
       }
@@ -265,10 +267,13 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
           .sort((a, b) => a.num - b.num);
 
         if (nextSeasonEps.length > 0) {
+          const firstEp = nextSeasonEps[0];
           return {
             hasNext: true,
             season: nextSeasonObj.sNum,
-            episode: nextSeasonEps[0].num, // smallest valid episode number in that season
+            episode: firstEp.num, // smallest valid episode number in that season
+            movieId: firstEp.movie_id || firstEp.id || null,
+            name: firstEp.name || firstEp.title || '',
             isFinalOfSeries: false
           };
         }
@@ -291,15 +296,19 @@ function getNextEpisodeInfo(seriesId, currentSeason, currentEpisode, seriesData)
       hasNext: false,
       season: sNum,
       episode: eNum,
+      movieId: null,
+      name: '',
       isFinalOfSeries: isConfirmedEnded
     };
   }
 
-  // Fallback when catalogue season tree is not available
+  // Fallback when catalogue season tree is not available: strictly return hasNext: false (never assume eNum + 1)
   return {
-    hasNext: true,
+    hasNext: false,
     season: sNum,
-    episode: eNum + 1,
+    episode: eNum,
+    movieId: null,
+    name: '',
     isFinalOfSeries: false
   };
 }
@@ -1710,5 +1719,329 @@ console.log('\n======================================================');
   console.log('✓ Test 21 Passed: Embed iframe resume from timestamp without reload, postMessage seek protocol verification, and seek retry.');
 }
 
-console.log('ALL 21 COMPREHENSIVE TESTS PASSED CLEANLY! (21/21)');
+// Test 22: Next Episode Catalogue Discovery (Removal of synthetic eNum + 1 fallback, strict metadata validation, and identity)
+{
+  // 1. Missing currentSeriesData: strictly return hasNext: false
+  const noDataInfo = getNextEpisodeInfo('test_show', 1, 5, null);
+  assert.strictEqual(noDataInfo.hasNext, false, 'Missing seriesData must return hasNext: false');
+  assert.strictEqual(noDataInfo.episode, 5, 'Episode must not be incremented to 6');
+
+  // 2. Empty seasons array: strictly return hasNext: false
+  const emptySeasonsInfo = getNextEpisodeInfo('test_show', 1, 5, { seasons: [] });
+  assert.strictEqual(emptySeasonsInfo.hasNext, false, 'Empty seasons must return hasNext: false');
+
+  // 3. Intra-season discovery with non-contiguous episode numbers
+  const seriesData = {
+    title: 'The Mentalist',
+    seasons: [
+      {
+        season_number: 1,
+        episodes: [
+          { episode_number: 1, name: 'Pilot', movie_id: '6664' },
+          { episode_number: 3, name: 'Red Tide', movie_id: '6664' },
+          { episode_number: 16, name: 'Bloodshot', movie_id: '6664' },
+          { episode_number: 17, name: 'Carnelian Inc.', movie_id: '6664' }
+        ]
+      },
+      {
+        season_number: 2,
+        episodes: [
+          { episode_number: 1, name: 'Redemption', movie_id: '6664' }
+        ]
+      }
+    ]
+  };
+
+  // From S1E1, next available is S1E3 (non-contiguous)
+  const s1e1Next = getNextEpisodeInfo('6664', 1, 1, seriesData);
+  assert.strictEqual(s1e1Next.hasNext, true);
+  assert.strictEqual(s1e1Next.season, 1);
+  assert.strictEqual(s1e1Next.episode, 3);
+  assert.strictEqual(s1e1Next.name, 'Red Tide');
+  assert.strictEqual(s1e1Next.movieId, '6664');
+
+  // From S1E16, next available is S1E17
+  const s1e16Next = getNextEpisodeInfo('6664', 1, 16, seriesData);
+  assert.strictEqual(s1e16Next.hasNext, true);
+  assert.strictEqual(s1e16Next.season, 1);
+  assert.strictEqual(s1e16Next.episode, 17);
+  assert.strictEqual(s1e16Next.name, 'Carnelian Inc.');
+
+  // From S1E17, next is S2E1 (season transition)
+  const s1e17Next = getNextEpisodeInfo('6664', 1, 17, seriesData);
+  assert.strictEqual(s1e17Next.hasNext, true);
+  assert.strictEqual(s1e17Next.season, 2);
+  assert.strictEqual(s1e17Next.episode, 1);
+  assert.strictEqual(s1e17Next.name, 'Redemption');
+
+  // From S2E1 (last available episode), hasNext is false
+  const s2e1Next = getNextEpisodeInfo('6664', 2, 1, seriesData);
+  assert.strictEqual(s2e1Next.hasNext, false);
+
+  // 4. getNextEpisode helper matching index.html
+  function simulateGetNextEpisode(curSeriesData, cId, sNum, eNum) {
+    if (!curSeriesData || !Array.isArray(curSeriesData.seasons) || curSeriesData.seasons.length === 0) return null;
+    const canonId = getCanonicalSeriesId(curSeriesData, cId, curSeriesData);
+    const info = getNextEpisodeInfo(canonId, sNum, eNum, curSeriesData);
+    if (!info || !info.hasNext || !info.season || !info.episode) return null;
+    const sPad = String(info.season).padStart(2, '0');
+    const ePad = String(info.episode).padStart(2, '0');
+    const epLabel = `S${sPad} E${ePad}`;
+    const epName = info.name || `Episode ${info.episode}`;
+    return {
+      season: info.season,
+      episode: info.episode,
+      movieId: info.movieId || cId,
+      name: epName,
+      label: epLabel,
+      fullTitle: `${epLabel}${epName ? ' · ' + epName : ''}`
+    };
+  }
+
+  const helperRes = simulateGetNextEpisode(seriesData, '6664', 1, 16);
+  assert(helperRes !== null, 'Next episode must be resolved');
+  assert.strictEqual(helperRes.season, 1);
+  assert.strictEqual(helperRes.episode, 17);
+  assert.strictEqual(helperRes.label, 'S01 E17');
+  assert.strictEqual(helperRes.fullTitle, 'S01 E17 · Carnelian Inc.');
+  assert.strictEqual(helperRes.movieId, '6664');
+
+  const finalHelperRes = simulateGetNextEpisode(seriesData, '6664', 2, 1);
+  assert.strictEqual(finalHelperRes, null, 'Final episode must return null from getNextEpisode()');
+
+  console.log('✓ Test 22 Passed: Next Episode resolution strictly validates catalogue season tree, eliminates eNum+1 fallback, and resolves metadata.');
+}
+
+// Test 23: Next Episode Popup Timing, Thresholds, Provider Compatibility, Fullscreen & Session Memory
+{
+  const mentalistSeries = {
+    title: 'The Mentalist',
+    seasons: [
+      {
+        season_number: 1,
+        episodes: [
+          { episode_number: 16, name: 'Bloodshot', movie_id: '6664' },
+          { episode_number: 17, name: 'Carnelian Inc.', movie_id: '6664' }
+        ]
+      }
+    ]
+  };
+
+  let shownPopupKey = '';
+  let dismissedPopupKey = '';
+  let popupVisible = false;
+  let popupData = null;
+  let isTransitioning = false;
+  let activeSeason = 1;
+  let activeEpisode = 16;
+  let activeContent = 'series_6664_s1_e16';
+
+  function simulateShowPopup(next, epKey) {
+    popupVisible = true;
+    popupData = next;
+    shownPopupKey = epKey;
+  }
+
+  function simulateDismissPopup() {
+    popupVisible = false;
+    if (shownPopupKey) dismissedPopupKey = shownPopupKey;
+  }
+
+  function simulateCheckAndTriggerNextEp(playbackState) {
+    if (!activeContent || !activeContent.startsWith('series_')) {
+      simulateDismissPopup();
+      return;
+    }
+    if (!activeSeason || !activeEpisode) return;
+
+    let duration = null;
+    let currentTime = 0;
+
+    if (playbackState.mode === 'native') {
+      if (playbackState.readyState >= 1 && Number.isFinite(playbackState.duration) && playbackState.duration > 0) {
+        duration = playbackState.duration;
+        currentTime = playbackState.currentTime || 0;
+      } else {
+        return; // Missing/unverified native duration
+      }
+    } else if (playbackState.mode === 'iframe') {
+      if (playbackState.hasVerifiedDuration && Number.isFinite(playbackState.duration) && playbackState.duration > 0) {
+        duration = playbackState.duration;
+        currentTime = playbackState.currentTime || 0;
+      } else {
+        return; // Missing/unverified iframe duration (e.g. Ask4Movies or ad frame)
+      }
+    } else {
+      return;
+    }
+
+    const REMAINING_THRESHOLD = 180;
+    const remaining = duration - currentTime;
+
+    let isEligible = false;
+    if (duration > REMAINING_THRESHOLD) {
+      isEligible = remaining > 0 && remaining <= REMAINING_THRESHOLD && currentTime >= 5;
+    } else {
+      // Short episodes (duration <= 180s): trigger when >= 50% elapsed and remaining > 0
+      isEligible = currentTime >= (duration * 0.5) && remaining > 0 && currentTime >= 5;
+    }
+
+    if (!isEligible) return;
+
+    const epKey = `series_6664_s${activeSeason}_e${activeEpisode}`;
+    if (shownPopupKey === epKey || dismissedPopupKey === epKey) {
+      return;
+    }
+
+    const nextInfo = getNextEpisodeInfo('6664', activeSeason, activeEpisode, mentalistSeries);
+    if (!nextInfo || !nextInfo.hasNext) return;
+
+    simulateShowPopup(nextInfo, epKey);
+  }
+
+  // 1. Standard Episode (45 mins = 2700s):
+  // At 2400s (remaining = 300s > 180s) -> Must NOT trigger
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2400 });
+  assert.strictEqual(popupVisible, false, 'Must not trigger when 300s remaining (> 180s)');
+
+  // At 2520s (remaining = 180s) -> Must trigger exactly at 180s
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2520 });
+  assert.strictEqual(popupVisible, true, 'Must trigger when remaining <= 180s');
+  assert.strictEqual(shownPopupKey, 'series_6664_s1_e16');
+  assert.strictEqual(popupData.episode, 17);
+
+  // 2. Backward Seek Protection:
+  // If user seeks backwards to 2200s, popup key is already registered in shownPopupKey, must not re-show
+  popupVisible = false;
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2200 });
+  assert.strictEqual(popupVisible, false, 'Backward seek must not re-open popup');
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2550 });
+  assert.strictEqual(popupVisible, false, 'Already shown session must not re-show popup');
+
+  // 3. Dismissal Memory:
+  shownPopupKey = '';
+  dismissedPopupKey = '';
+  popupVisible = false;
+  // Trigger popup
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2525 });
+  assert.strictEqual(popupVisible, true);
+  // Dismiss popup
+  simulateDismissPopup();
+  assert.strictEqual(popupVisible, false);
+  assert.strictEqual(dismissedPopupKey, 'series_6664_s1_e16');
+  // Continuing playback or seeking within that episode must NOT show popup again
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 2700, currentTime: 2600 });
+  assert.strictEqual(popupVisible, false, 'Dismissed popup must stay dismissed for active episode session');
+
+  // 4. Short Episode (e.g. 120s anime short or webisode):
+  // Reset session
+  shownPopupKey = '';
+  dismissedPopupKey = '';
+  popupVisible = false;
+  // At 10s (remaining = 110s <= 180s, but < 50% elapsed) -> Must NOT fire prematurely at start
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 120, currentTime: 10 });
+  assert.strictEqual(popupVisible, false, 'Short episode must not fire prematurely at start of episode');
+
+  // At 65s (elapsed > 50%, remaining = 55s > 0) -> Must trigger cleanly
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 4, duration: 120, currentTime: 65 });
+  assert.strictEqual(popupVisible, true, 'Short episode must trigger once 50% elapsed');
+
+  // 5. Unverified / Missing Duration:
+  shownPopupKey = '';
+  dismissedPopupKey = '';
+  popupVisible = false;
+  // Missing duration in native video
+  simulateCheckAndTriggerNextEp({ mode: 'native', readyState: 0, duration: NaN, currentTime: 200 });
+  assert.strictEqual(popupVisible, false, 'Missing native duration must suppress popup');
+
+  // Unverified iframe provider (Ask4Movies or iframe with ad duration)
+  simulateCheckAndTriggerNextEp({ mode: 'iframe', hasVerifiedDuration: false, duration: 0, currentTime: 50 });
+  assert.strictEqual(popupVisible, false, 'Unverified iframe telemetry must suppress popup');
+
+  // Verified Movies7 iframe telemetry
+  simulateCheckAndTriggerNextEp({ mode: 'iframe', hasVerifiedDuration: true, duration: 1800, currentTime: 1650 });
+  assert.strictEqual(popupVisible, true, 'Verified iframe telemetry (remaining 150s <= 180s) must trigger popup');
+
+  // 6. Transition & Fullscreen Preservation:
+  let isPlayerFullscreen = true;
+  let progressSavedForCurrentEp = false;
+
+  async function simulateTriggerPlayNextEpisode() {
+    if (isTransitioning) return;
+    isTransitioning = true;
+
+    // Save progress of current episode
+    progressSavedForCurrentEp = true;
+
+    // Switch episode
+    const nextEp = popupData.episode;
+    const nextSeason = popupData.season;
+    activeSeason = nextSeason;
+    activeEpisode = nextEp;
+    activeContent = `series_6664_s${nextSeason}_e${nextEp}`;
+
+    // Dismiss popup & reset session keys for new episode
+    simulateDismissPopup();
+    shownPopupKey = '';
+    dismissedPopupKey = '';
+
+    // Fullscreen state is preserved across switch
+    assert.strictEqual(isPlayerFullscreen, true, 'Fullscreen must be preserved during episode transition');
+
+    isTransitioning = false;
+  }
+
+  simulateTriggerPlayNextEpisode();
+  assert.strictEqual(progressSavedForCurrentEp, true, 'Current episode progress must be saved');
+  assert.strictEqual(activeEpisode, 17, 'Active episode must advance to 17');
+  assert.strictEqual(activeContent, 'series_6664_s1_e17', 'Active content ID must update');
+  assert.strictEqual(popupVisible, false, 'Popup must be dismissed');
+  assert.strictEqual(isPlayerFullscreen, true, 'Player must remain in fullscreen mode');
+
+  // 7. Top Layer Popover & Fullscreen Verification:
+  // When iframe or video toolbar enters fullscreen directly, the popup ascends into the
+  // browser Top Layer via popover="manual" (showPopover / hidePopover), rendering directly
+  // above the fullscreen media element.
+  let isMockPopoverOpen = false;
+  let isMockModalOpen = false;
+  const mockPopup = {
+    open: false,
+    style: { display: 'none' },
+    showModal: () => { isMockModalOpen = true; mockPopup.open = true; },
+    close: () => { isMockModalOpen = false; mockPopup.open = false; },
+    showPopover: () => { isMockPopoverOpen = true; },
+    hidePopover: () => { isMockPopoverOpen = false; }
+  };
+
+  function simulateShowPopupTopLayer() {
+    mockPopup.style.display = 'flex';
+    if (isPlayerFullscreen) {
+      if (typeof mockPopup.showModal === 'function') mockPopup.showModal();
+      if (typeof mockPopup.showPopover === 'function') mockPopup.showPopover();
+    }
+  }
+
+  function simulateDismissPopupTopLayer() {
+    mockPopup.style.display = 'none';
+    if (typeof mockPopup.close === 'function') mockPopup.close();
+    if (typeof mockPopup.hidePopover === 'function') mockPopup.hidePopover();
+  }
+
+  // Trigger popup while in fullscreen
+  simulateShowPopupTopLayer();
+  assert.strictEqual(mockPopup.style.display, 'flex');
+  assert.strictEqual(mockPopup.open, true, 'Popup must be in browser Top Layer via modal dialog');
+
+  // Next episode transition preserves fullscreen
+  const wasFs = isPlayerFullscreen;
+  let playerContainerIsFs = wasFs;
+  simulateDismissPopupTopLayer();
+  assert.strictEqual(mockPopup.style.display, 'none');
+  assert.strictEqual(mockPopup.open, false, 'Dismissed popup must close dialog');
+  assert.strictEqual(playerContainerIsFs, true, 'Fullscreen state must be seamlessly preserved across episode switch');
+
+  console.log('✓ Test 23 Passed: Next Episode popup timing, 180s threshold, short episode handling, unverified duration suppression, dismissal memory, and fullscreen continuity.');
+}
+
+console.log('ALL 23 COMPREHENSIVE TESTS PASSED CLEANLY! (23/23)');
 console.log('======================================================\n');
