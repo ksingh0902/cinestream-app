@@ -105,7 +105,7 @@ def _lookup_dooflix_tmdb_id(title: str, year: str | None, is_series: bool) -> st
 
 def _dooflix_embed_url(tmdb_id: str, title: str, is_series: bool, season: int | str | None = None, episode: int | str | None = None) -> str:
     if not is_series:
-        return f"https://vidsrc.pm/embed/movie/{tmdb_id}"
+        return f"https://embed.filmu.in/movie/{tmdb_id}"
     season_no = str(season) if season else None
     episode_no = str(episode) if episode else None
     if not season_no:
@@ -114,12 +114,13 @@ def _dooflix_embed_url(tmdb_id: str, title: str, is_series: bool, season: int | 
     if not episode_no:
         e_m = re.search(r"\bepisode\s*(\d+)\b", title or "", re.I)
         episode_no = e_m.group(1) if episode_no else "1"
-    return f"https://vidsrc.pm/embed/tv/{tmdb_id}/{season_no}/{episode_no}"
+    return f"https://embed.filmu.in/tv/{tmdb_id}/{season_no}/{episode_no}"
 
 
 def _prioritize_dooflix_servers(servers: list[dict]) -> tuple[str, list[dict]]:
-    """Prefer verified fast reachable providers."""
+    """Prefer verified fast reachable providers: FilmU first, VIP - No ADS second."""
     priority = (
+        "filmu",
         "vip - no ads",
         "vidsrc.si",
         "fast ui - hd",
@@ -128,7 +129,6 @@ def _prioritize_dooflix_servers(servers: list[dict]) -> tuple[str, list[dict]]:
         "vidrock",
         "123embed",
         "videasy",
-        "filmu",
         "vidcore",
         "vidsrc",
         "2embed",
@@ -139,7 +139,23 @@ def _prioritize_dooflix_servers(servers: list[dict]) -> tuple[str, list[dict]]:
         return next((index for index, token in enumerate(priority) if token in haystack), len(priority))
 
     ordered = sorted(servers, key=rank)
-    return (ordered[0]["url"] if ordered else ""), ordered
+    relabeled = []
+    for i, srv in enumerate(ordered):
+        lbl = srv.get("label", "")
+        u = srv.get("url", "")
+        u_lower = u.lower()
+        if "filmu" in u_lower:
+            srv_name = "FilmU - Fast HD"
+        elif "vidsrc.si" in u_lower or "vip" in lbl.lower():
+            srv_name = "VIP - No ADS"
+        elif "vidfast" in u_lower or "fast ui" in lbl.lower():
+            srv_name = "Fast UI - HD"
+        elif "(" in lbl:
+            srv_name = lbl.split("(", 1)[-1].rstrip(")")
+        else:
+            srv_name = lbl or "HD"
+        relabeled.append({"label": f"Server {i+1} ({srv_name})", "url": u})
+    return (relabeled[0]["url"] if relabeled else ""), relabeled
 
 
 @router.get("/api/stream/{movie_id}")
@@ -168,6 +184,13 @@ def stream(
     adapter = registry.get(source)
     if adapter is None:
         raise HTTPException(500, f"no adapter for source {source}")
+
+    is_series_record = bool(row["is_series"]) or bool(re.search(r"\b(?:season\s*\d+|s\d+\s*e\d+)\b", row["title"] or "", re.I))
+    if has_ep_params and not is_series_record:
+        # Ignore client-passed season/episode parameters for movies so they are never resolved as TV series
+        has_ep_params = False
+        target_season = None
+        target_episode = None
 
     if has_ep_params:
         tmdb_id = row["tmdb_id"]
@@ -208,7 +231,7 @@ def stream(
         if tmdb_id and source != "movies7":
             s_num = target_season or 1
             e_num = target_episode or 1
-            dummy_url = f"https://embed.vidsrc.si/embed/tv/{tmdb_id}/{s_num}/{e_num}?autoplay=1&ds_lang=en"
+            dummy_url = f"https://embed.filmu.in/tv/{tmdb_id}/{s_num}/{e_num}"
             existing_servers = []
             if row["servers_json"]:
                 try:
@@ -261,9 +284,12 @@ def stream(
                 )
             except Exception:
                 pass
-        # Re-resolve movies7 cache so Cinesrc is primary for all movies7 titles
-        if "cinesrc" not in (row["player_url"] or "").lower():
+        # Re-resolve movies7 cache so FilmU is primary
+        if "embed.filmu.in" not in (row["player_url"] or "").lower():
             is_fresh = False
+    # Invalidate stale /tv/ player_url or servers cached on a movie
+    if is_fresh and not is_series_record and ("/tv/" in (row["player_url"] or "") or (row["servers_json"] and "/tv/" in row["servers_json"])):
+        is_fresh = False
     # Invalidate stale speedostream iframe embeds which show Embeds disabled3
     if is_fresh and "speedostream" in (row["player_url"] or "").lower() and row["player_kind"] == "iframe":
         is_fresh = False
@@ -279,7 +305,7 @@ def stream(
         p_kind = row["player_kind"] or adapter.player_kind
         p_url = row["player_url"]
         if p_kind == "iframe" and source != "movies7":
-            p_url, servers = enrich_stream_servers(p_url, is_series=bool(row["is_series"]), existing_servers=servers, tmdb_id=str(row["tmdb_id"] or ""))
+            p_url, servers = enrich_stream_servers(p_url, is_series=is_series_record, existing_servers=servers, tmdb_id=str(row["tmdb_id"] or ""))
             if source == "dooflix":
                 p_url, servers = _prioritize_dooflix_servers(servers)
 
@@ -397,7 +423,7 @@ def stream(
         info = None
         if tmdb_id and source != "movies7" and (source == "ask4movie" or row["player_kind"] == "iframe"):
             is_series = doo_is_series if source == "dooflix" else bool(row["is_series"])
-            dummy_url = f"https://embed.vidsrc.si/embed/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "") + "?autoplay=1&ds_lang=en"
+            dummy_url = f"https://embed.filmu.in/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "")
             main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
             if source == "dooflix":
                 main_url, servers = _prioritize_dooflix_servers(servers)
@@ -468,9 +494,9 @@ def stream(
             if p_kind == "iframe" and source != "movies7":
                 p_url, servers = enrich_stream_servers(
                     p_url,
-                    is_series=doo_is_series if source == "dooflix" else bool(row["is_series"]),
+                    is_series=doo_is_series if source == "dooflix" else is_series_record,
                     existing_servers=servers,
-                    tmdb_id=str(tmdb_id or "") if source == "dooflix" else None,
+                    tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
                 )
                 if source == "dooflix":
                     p_url, servers = _prioritize_dooflix_servers(servers)
@@ -490,9 +516,9 @@ def stream(
     if info.kind == "iframe" and source != "movies7":
         info.url, info.servers = enrich_stream_servers(
             info.url,
-            is_series=doo_is_series if source == "dooflix" else bool(row["is_series"]),
+            is_series=doo_is_series if source == "dooflix" else is_series_record,
             existing_servers=info.servers,
-            tmdb_id=str(tmdb_id or row["tmdb_id"] or "") if (source in ("dooflix", "movies7") or row["tmdb_id"]) else None,
+            tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
         )
         if source == "dooflix":
             info.url, info.servers = _prioritize_dooflix_servers(info.servers)

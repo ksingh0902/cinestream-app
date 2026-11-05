@@ -1941,95 +1941,7 @@ body.player-is-fullscreen {
   object-fit: contain;
 }
 
-/* Fullscreen Top Controls Bar */
-.fs-top-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 99996;
-  padding: 16px 24px;
-  background: linear-gradient(180deg, rgba(10, 12, 16, 0.94) 0%, rgba(10, 12, 16, 0.7) 65%, transparent 100%);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  opacity: 0;
-  transform: translateY(-8px);
-  transition: opacity 0.25s ease, transform 0.25s ease;
-  pointer-events: none;
-}
-.player-container.is-fullscreen .fs-top-bar.fs-visible,
-.player-container.is-fullscreen:hover .fs-top-bar,
-.player-container:fullscreen .fs-top-bar.fs-visible,
-.player-container:-webkit-full-screen .fs-top-bar.fs-visible,
-.player-container:fullscreen:hover .fs-top-bar,
-.player-container:-webkit-full-screen:hover .fs-top-bar,
-.fs-top-bar:hover {
-  opacity: 1 !important;
-  transform: translateY(0) !important;
-  pointer-events: auto !important;
-}
-.fs-top-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-.fs-btn-back {
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff;
-  padding: 6px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.fs-btn-back:hover {
-  background: rgba(255, 255, 255, 0.26);
-  border-color: rgba(255, 255, 255, 0.45);
-}
-.fs-title {
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  text-shadow: 0 2px 6px rgba(0,0,0,0.85);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.fs-top-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.fs-btn-icon {
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.fs-btn-icon:hover {
-  background: rgba(255, 255, 255, 0.26);
-}
-.fs-control-icon { width:22px; height:22px; display:block; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-
-.player-container.fs-idle .fs-top-bar {
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
+/* Fullscreen Top Controls Bar - removed to prevent overlap with native embed controls */
 
 /* Resume Banner Overlay */
 .resume-banner {
@@ -2052,14 +1964,7 @@ body.player-is-fullscreen {
   animation: fadeInUp .25s ease-out;
   color: #fff;
 }
-#player-container:fullscreen .fs-top-bar,
-#player-container:-webkit-full-screen .fs-top-bar,
-.player-container.is-fullscreen .fs-top-bar,
-:fullscreen .fs-top-bar,
-:-webkit-full-screen .fs-top-bar,
-body.player-is-fullscreen .fs-top-bar {
-  z-index: 2147483647 !important;
-}
+
 .resume-banner {
   left: 50%;
   right: auto;
@@ -2589,16 +2494,7 @@ body.watch-page .syn { margin:0; line-height:1.65; }
     </div>
     <div id="server-switcher" style="display:none;gap:8px;padding:8px 0 12px;flex-wrap:wrap;align-items:center;"></div>
     <div class="player-container" id="player-container">
-      <!-- Fullscreen Top Controls Bar -->
-      <div id="fs-top-bar" class="fs-top-bar" style="display:none;">
-        <div class="fs-top-left">
-          <button class="fs-btn-back" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (Escape or F)">← Exit</button>
-          <span id="fs-show-title" class="fs-title"></span>
-        </div>
-        <div class="fs-top-right">
-          <button class="fs-btn-icon" onclick="togglePlayerFullscreen()" title="Exit Fullscreen (F)" aria-label="Exit fullscreen"><svg class="fs-control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg></button>
-        </div>
-      </div>
+
       <video id="v" controls playsinline controlslist="noremoteplayback" crossorigin="anonymous"></video>
       <iframe id="p-iframe" style="display:none;width:100%;height:100%;border:0;position:absolute;inset:0;" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true" referrerpolicy="no-referrer"></iframe>
       <div id="player-hud"></div>
@@ -3081,14 +2977,15 @@ function getCanonicalSeriesId(item, curId, currentSeriesData) {
   return item && item.id != null ? String(item.id) : '';
 }
 function extractSeriesInfo(title, item) {
-  const isSeries = !!(
-    (activeSeasonNum != null && activeEpisodeNum != null) ||
+  const isExplicitMovie = item?.is_series === false || item?.is_series === 0;
+  const isSeries = !isExplicitMovie && !!(
     item?.is_series ||
+    (item && (item.series_id != null || item.season != null || item.episode != null)) ||
     (currentSeriesData && currentSeriesData.is_series) ||
-    /season|episode|s\d+\s*e\d+/i.test(title || '')
+    /season|episode|\bs\d+\s*e\d+\b/i.test(title || '')
   );
-  let season = (activeSeasonNum != null) ? activeSeasonNum : (item?.season ?? item?.season_id ?? null);
-  let episode = (activeEpisodeNum != null) ? activeEpisodeNum : (item?.episode ?? item?.episode_id ?? null);
+  let season = (isSeries && activeSeasonNum != null) ? activeSeasonNum : (item?.season ?? item?.season_id ?? null);
+  let episode = (isSeries && activeEpisodeNum != null) ? activeEpisodeNum : (item?.episode ?? item?.episode_id ?? null);
   if (isSeries) {
     if (season == null) {
       const sMatch = (title || '').match(/season\s*(\d+)/i) || (title || '').match(/s(\d+)\s*e/i);
@@ -3100,8 +2997,8 @@ function extractSeriesInfo(title, item) {
     }
   }
   const seriesId = getCanonicalSeriesId(item, curId, currentSeriesData);
-  const seasonNum = season || 1;
-  const episodeNum = episode || 1;
+  const seasonNum = isSeries ? (season || 1) : null;
+  const episodeNum = isSeries ? (episode || 1) : null;
   const contentId = isSeries
     ? `series_${seriesId}_s${seasonNum}_e${episodeNum}`
     : `movie_${item?.id || curId || ''}`;
@@ -3475,12 +3372,36 @@ function toggleCwInfoModal(show) {
   if (modal) modal.style.display = show ? 'flex' : 'none';
 }
 
-function checkAndShowResumeBanner(contentId) {
+function checkAndShowResumeBanner(contentId, isVipExplicit = false) {
   const banner = document.getElementById('resume-banner');
   if (!banner) return;
 
+  // On FilmU server - do NOT show Resume or Start Over. Keep it for VIP-no-ads (and native HLS).
+  const currentUrl = (pIframe && pIframe.src) ? pIframe.src.toLowerCase() : '';
+  const srvBox = document.getElementById('server-switcher');
+  const activePill = srvBox ? srvBox.querySelector('.pill.active') : null;
+  const pillText = activePill ? activePill.textContent.toLowerCase() : '';
+
+  const isFilmU = currentUrl.includes('filmu') || pillText.includes('filmu');
+  if (isFilmU && !isVipExplicit) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const isVip = isVipExplicit || currentUrl.includes('vidsrc.si') || pillText.includes('vip');
+  const isIframe = (pIframe && pIframe.style.display !== 'none') || (currentUrl && currentUrl !== 'about:blank');
+  if (isIframe && !isVip) {
+    banner.style.display = 'none';
+    return;
+  }
+
   const saved = StorageManager.getItem(contentId);
   const isSeries = !!(saved?.is_series || (contentId && contentId.startsWith('series_')));
+  if (isSeries && !isVip) {
+    banner.style.display = 'none';
+    return;
+  }
+
   const isEligible = saved && saved.currentTime >= 5 && (
     isSeries ? !saved.isCompleted : (!saved.duration || (saved.currentTime / saved.duration) < 0.95)
   );
@@ -3683,10 +3604,9 @@ function savePlaybackProgress(force = false) {
 
   const currentItem = window.movieCache?.get(curId) || currentSeriesData || {};
   const seriesInfo = extractSeriesInfo(currentItem.title, currentItem);
-  const isSeries = !!(
+  const isSeries = !seriesInfo.isExplicitMovie && !!(
     seriesInfo.isSeries ||
-    (activeContentId && activeContentId.startsWith('series_')) ||
-    (activeSeasonNum != null && activeEpisodeNum != null)
+    (activeContentId && activeContentId.startsWith('series_'))
   );
 
   const parentSeriesId = getCanonicalSeriesId(currentItem, curId, currentSeriesData);
@@ -4469,33 +4389,34 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   const canonInitId = sInfo.seriesId || getCanonicalSeriesId(initItem, id, null);
 
   // If opening series without explicit targetSeason/targetEpisode, restore active episode from Continue Watching
-  if (targetSeason == null && targetEpisode == null) {
-    const allCw = StorageManager.getAll();
-    const seriesEps = allCw.filter(it => {
-      const isSer = !!(it.is_series || (it.contentId && it.contentId.startsWith('series_')));
-      if (!isSer) return false;
-      const sMatch = it.contentId ? it.contentId.match(/^series_(.+)_s\d+_e\d+$/) : null;
-      const sId = String(it.series_id || (sMatch ? sMatch[1] : null) || it.id || '');
-      return sId === String(canonInitId) || sId === String(id) || String(it.id) === String(id);
-    });
-    if (seriesEps.length > 0) {
-      seriesEps.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      const activeSavedEp = seriesEps.find(ep => !ep.isCompleted) || seriesEps[0];
-      if (activeSavedEp && activeSavedEp.season != null && activeSavedEp.episode != null) {
-        targetSeason = activeSavedEp.season;
-        targetEpisode = activeSavedEp.episode;
+  if (sInfo.isSeries) {
+    if (targetSeason == null && targetEpisode == null) {
+      const allCw = StorageManager.getAll();
+      const seriesEps = allCw.filter(it => {
+        const isSer = !!(it.is_series || (it.contentId && it.contentId.startsWith('series_')));
+        if (!isSer) return false;
+        const sMatch = it.contentId ? it.contentId.match(/^series_(.+)_s\d+_e\d+$/) : null;
+        const sId = String(it.series_id || (sMatch ? sMatch[1] : null) || it.id || '');
+        return sId === String(canonInitId) || sId === String(id) || String(it.id) === String(id);
+      });
+      if (seriesEps.length > 0) {
+        seriesEps.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const activeSavedEp = seriesEps.find(ep => !ep.isCompleted) || seriesEps[0];
+        if (activeSavedEp && activeSavedEp.season != null && activeSavedEp.episode != null) {
+          targetSeason = activeSavedEp.season;
+          targetEpisode = activeSavedEp.episode;
+        }
       }
     }
-  }
-
-  if(targetSeason != null && targetEpisode != null){
-    activeSeasonNum = targetSeason;
-    activeEpisodeNum = targetEpisode;
-    activeContentId = `series_${canonInitId}_s${targetSeason}_e${targetEpisode}`;
+    activeSeasonNum = targetSeason || sInfo.season || 1;
+    activeEpisodeNum = targetEpisode || sInfo.episode || 1;
+    activeContentId = `series_${canonInitId}_s${activeSeasonNum}_e${activeEpisodeNum}`;
   } else {
     activeSeasonNum = null;
     activeEpisodeNum = null;
-    activeContentId = sInfo.isSeries ? sInfo.contentId : `movie_${id}`;
+    targetSeason = null;
+    targetEpisode = null;
+    activeContentId = `movie_${id}`;
   }
   dismissResumePrompt();
   dismissNextEpisodeToast(false);
@@ -4514,12 +4435,14 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
     seasonsWrap.innerHTML = '';
   }
 
-  if(activeSeasonNum == null && activeEpisodeNum == null){
-    if (sInfo.isSeries) {
-      activeSeasonNum = sInfo.season || 1;
-      activeEpisodeNum = sInfo.episode || 1;
-    }
-    activeContentId = sInfo.contentId || `movie_${id}`;
+  if(sInfo.isSeries && activeSeasonNum == null && activeEpisodeNum == null){
+    activeSeasonNum = sInfo.season || 1;
+    activeEpisodeNum = sInfo.episode || 1;
+    activeContentId = sInfo.contentId || `series_${canonInitId}_s1_e1`;
+  } else if(!sInfo.isSeries) {
+    activeSeasonNum = null;
+    activeEpisodeNum = null;
+    activeContentId = `movie_${id}`;
   }
   checkAndShowResumeBanner(activeContentId);
   if (currentSavedProgress && currentSavedProgress.currentTime) {
@@ -4609,13 +4532,11 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
     const hasYearInTitle = item.title && /\(\s*\d{4}\s*\)/.test(item.title);
     const yr = (item.year && !hasYearInTitle) ? ` (${esc(item.year)})` : '';
     const cleanBase = (item.title || ('Movie #' + id)).replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
-    const isSeries = !!(sInfo.isSeries || metaInfo.isSeries || (activeSeasonNum != null && activeEpisodeNum != null));
+    const isSeries = Boolean(sInfo.isSeries || metaInfo.isSeries || item.is_series);
     const epSuffix = (isSeries && activeSeasonNum != null && activeEpisodeNum != null)
       ? ` · S${String(activeSeasonNum).padStart(2, '0')} E${String(activeEpisodeNum).padStart(2, '0')}`
       : '';
     document.getElementById('p-title').innerHTML = `${srcTag} ${dubTag} ${esc(cleanBase)}${epSuffix}${yr}`;
-    const fsTitle = document.getElementById('fs-show-title');
-    if(fsTitle) fsTitle.textContent = `${cleanBase}${epSuffix}`;
     document.getElementById('p-syn').textContent = item.synopsis || '';
     const metaBits = [];
     if(item.rating) metaBits.push(`Rating ${esc(item.rating)}`);
@@ -4664,17 +4585,20 @@ async function openPlayer(id, targetSeason = null, targetEpisode = null){
   const btnCC = document.getElementById('btn-cc');
   if(btnCC) btnCC.textContent = 'CC: English (ON)';
 
-  // Load Seasons & Episodes hierarchy asynchronously
-  loadSeriesSeasons(id);
+  // Load Seasons & Episodes hierarchy asynchronously only for series
+  if(sInfo.isSeries || targetSeason != null || targetEpisode != null){
+    loadSeriesSeasons(id);
+  }
 
-  const fetchS = (activeSeasonNum != null) ? activeSeasonNum : targetSeason;
-  const fetchE = (activeEpisodeNum != null) ? activeEpisodeNum : targetEpisode;
+  const isSeriesContent = Boolean(sInfo.isSeries || (targetSeason != null && targetEpisode != null));
+  const fetchS = isSeriesContent ? ((activeSeasonNum != null) ? activeSeasonNum : targetSeason) : null;
+  const fetchE = isSeriesContent ? ((activeEpisodeNum != null) ? activeEpisodeNum : targetEpisode) : null;
   await fetchStream(id, false, fetchS, fetchE);
 }
 
 let currentSeriesData = null;
-let activeSeasonNum = 1;
-let activeEpisodeNum = 1;
+let activeSeasonNum = null;
+let activeEpisodeNum = null;
 let nextEpCountdownTimer = null;
 let nextEpSecondsLeft = 5;
 let nextEpPromptKey = '';
@@ -4864,10 +4788,6 @@ async function loadSeriesSeasons(id){
       const badgeHtml = curBadge ? curBadge.outerHTML + ' ' : '';
       pTitleEl.innerHTML = `${badgeHtml}${esc(cleanBase)} · S${sPad} E${epPad}`;
     }
-    const fsTitle = document.getElementById('fs-show-title');
-    if(fsTitle){
-      fsTitle.textContent = `${cleanBase} · S${sPad} E${epPad}`;
-    }
     renderSeasonsUI();
     checkAndTriggerNextEp();
   } catch(e){
@@ -5013,10 +4933,6 @@ async function selectEpisodeChip(sNum, eNum, epMovieId){
       const badgeHtml = curBadge ? curBadge.outerHTML + ' ' : '';
       pTitleEl.innerHTML = `${badgeHtml}${esc(cleanBase)} · S${sPad} E${epPad}`;
     }
-    const fsTitle = document.getElementById('fs-show-title');
-    if(fsTitle){
-      fsTitle.textContent = `${cleanBase} · S${sPad} E${epPad}`;
-    }
   }
 
   if(epMovieId && String(epMovieId) !== String(curId)){
@@ -5109,6 +5025,18 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
       const tagEp = (season != null && episode != null) ? ` · S${season} E${episode}` : '';
       statusEl.textContent = `${firstServerLabel}${tagEp} · Active stream player ${s.cached ? '(cached)' : ''}`;
 
+      // On FilmU server, dismiss resume banner; on VIP-no-ads, allow resume banner
+      const isFilmU = playUrl.includes('filmu') || firstServerLabel.toLowerCase().includes('filmu');
+      const isVipServer = playUrl.includes('vidsrc.si') || firstServerLabel.toLowerCase().includes('vip');
+      if (isFilmU) {
+        dismissResumePrompt();
+      } else if (isVipServer) {
+        const activeEpId = (typeof currentSeriesData !== 'undefined' && currentSeriesData)
+          ? getActiveSeriesEpisodeContentId(id, season, episode)
+          : String(id);
+        checkAndShowResumeBanner(activeEpId, true);
+      }
+
       // Server switcher pills
       if(srvBox && s.servers && s.servers.length > 1){
         s.servers.forEach((srv, idx) => {
@@ -5126,6 +5054,19 @@ async function fetchStream(id, fresh = false, season = null, episode = null){
             srvBox.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             statusEl.textContent = `${srv.label || ('Server ' + (idx + 1))}${tagEp} · Active stream player`;
+
+            const uLow = (srv.url || '').toLowerCase();
+            const lblLow = (srv.label || '').toLowerCase();
+            const isFilm = uLow.includes('filmu') || lblLow.includes('filmu');
+            const isVipPill = uLow.includes('vidsrc.si') || lblLow.includes('vip');
+            if (isFilm) {
+              dismissResumePrompt();
+            } else if (isVipPill) {
+              const activeEpId = (typeof currentSeriesData !== 'undefined' && currentSeriesData)
+                ? getActiveSeriesEpisodeContentId(curId, currentSeason, currentEpisode)
+                : String(curId);
+              checkAndShowResumeBanner(activeEpId, true);
+            }
           };
           srvBox.appendChild(btn);
         });
@@ -5287,8 +5228,6 @@ function closePlayer(triggerHistoryBack = true, restoreScroll = true){
   isPreservingEpisodeFullscreen = false;
   clearTimeout(episodeFsPreserveTimer);
   
-  const fsTopBar = document.getElementById('fs-top-bar');
-  if(fsTopBar){ fsTopBar.style.display = 'none'; fsTopBar.classList.remove('fs-visible'); }
   if(playerContainer) playerContainer.classList.remove('fs-idle');
   clearTimeout(fsActivityTimer);
   try {
@@ -5404,28 +5343,13 @@ let fsActivityTimer = null;
 function triggerFsActivity(){
   const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
   if(!isFs) return;
-  const fsTopBar = document.getElementById('fs-top-bar');
   if(playerContainer) playerContainer.classList.remove('fs-idle');
   if(video && video.style.display !== 'none' && !video.controls) video.controls = true;
-  if(fsTopBar){
-    fsTopBar.classList.add('fs-visible');
-    fsTopBar.style.visibility = 'visible';
-    fsTopBar.style.setProperty('opacity', '1', 'important');
-    fsTopBar.style.setProperty('transform', 'translateY(0)', 'important');
-    fsTopBar.style.setProperty('pointer-events', 'auto', 'important');
-  }
   clearTimeout(fsActivityTimer);
   fsActivityTimer = setTimeout(()=>{
     const isStillFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
     if(isStillFs){
       if(playerContainer) playerContainer.classList.add('fs-idle');
-      if(fsTopBar){
-        fsTopBar.classList.remove('fs-visible');
-        fsTopBar.style.visibility = 'hidden';
-        fsTopBar.style.setProperty('opacity', '0', 'important');
-        fsTopBar.style.setProperty('transform', 'translateY(-8px)', 'important');
-        fsTopBar.style.setProperty('pointer-events', 'none', 'important');
-      }
     }
   }, 4000);
 }
@@ -5523,11 +5447,6 @@ function handleFsStateChange(){
       if (playerContainer) playerContainer.classList.add('is-fullscreen');
       document.body.classList.add('player-is-fullscreen');
       updateFullscreenBtn();
-      const fsTopBar = document.getElementById('fs-top-bar');
-      if (fsTopBar) {
-        fsTopBar.style.display = 'flex';
-        fsTopBar.classList.add('fs-visible');
-      }
       return;
     }
 
@@ -5549,36 +5468,10 @@ function handleFsStateChange(){
   }
 
   updateFullscreenBtn();
-  const fsTopBar = document.getElementById('fs-top-bar');
 
   if(isFs){
-    if(fsTopBar){
-      fsTopBar.style.display = 'flex';
-      fsTopBar.classList.add('fs-visible');
-      const fsTitle = document.getElementById('fs-show-title');
-      if(fsTitle){
-        if(currentSeriesData && currentSeriesData.is_series){
-          const baseTitle = currentSeriesData.title || (window.movieCache?.get(curId)?.title) || '';
-          const cleanBase = baseTitle.replace(/\s*[-·]\s*S\d+\s*E\d+.*$/i, '').trim();
-          const sPad = String(activeSeasonNum || 1).padStart(2, '0');
-          const ePad = String(activeEpisodeNum || 1).padStart(2, '0');
-          fsTitle.textContent = `${cleanBase} · S${sPad} E${ePad}`;
-        } else {
-          const curItem = window.movieCache?.get(curId);
-          fsTitle.textContent = curItem?.title || '';
-        }
-      }
-    }
     triggerFsActivity();
   } else {
-    if(fsTopBar){
-      fsTopBar.style.display = 'none';
-      fsTopBar.style.visibility = 'hidden';
-      fsTopBar.classList.remove('fs-visible');
-      fsTopBar.style.removeProperty('opacity');
-      fsTopBar.style.removeProperty('transform');
-      fsTopBar.style.removeProperty('pointer-events');
-    }
     if(video) video.controls = true;
     clearTimeout(fsActivityTimer);
   }

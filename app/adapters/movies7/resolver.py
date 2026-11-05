@@ -39,22 +39,26 @@ def resolve(
     e = str(episode or 1)
 
     if series_detected:
-        primary_url = f"https://cinesrc.st/embed/tv/{tid}/{s}/{e}"
+        primary_url = f"https://embed.filmu.in/tv/{tid}/{s}/{e}"
         servers = [
-            {"label": "Cinesrc (HD)", "url": f"https://cinesrc.st/embed/tv/{tid}/{s}/{e}"},
-            {"label": "111Movies (Multi)", "url": f"https://111movies.net/tv/{tid}/{s}/{e}"},
-            {"label": "VidLink (Fast HD)", "url": f"https://vidlink.pro/tv/{tid}/{s}/{e}"},
-            {"label": "2Embed (Multi)", "url": f"https://www.2embed.cc/embedtv/{tid}&s={s}&e={e}"},
-            {"label": "PrimeSrc (Stream)", "url": f"https://primesrc.me/embed/tv?tmdb={tid}&season={s}&episode={e}"},
+            {"label": "Server 1 (FilmU - Fast HD)", "url": f"https://embed.filmu.in/tv/{tid}/{s}/{e}"},
+            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/tv/{tid}/{s}/{e}?autoplay=1&ds_lang=en"},
+            {"label": "Server 3 (Cinesrc - HD)", "url": f"https://cinesrc.st/embed/tv/{tid}/{s}/{e}"},
+            {"label": "Server 4 (111Movies - Multi)", "url": f"https://111movies.net/tv/{tid}/{s}/{e}"},
+            {"label": "Server 5 (VidLink - Fast HD)", "url": f"https://vidlink.pro/tv/{tid}/{s}/{e}"},
+            {"label": "Server 6 (2Embed - Multi)", "url": f"https://www.2embed.cc/embedtv/{tid}&s={s}&e={e}"},
+            {"label": "Server 7 (PrimeSrc - Stream)", "url": f"https://primesrc.me/embed/tv?tmdb={tid}&season={s}&episode={e}"},
         ]
     else:
-        primary_url = f"https://cinesrc.st/embed/movie/{tid}"
+        primary_url = f"https://embed.filmu.in/movie/{tid}"
         servers = [
-            {"label": "Cinesrc (HD)", "url": f"https://cinesrc.st/embed/movie/{tid}"},
-            {"label": "111Movies (Multi)", "url": f"https://111movies.net/movie/{tid}"},
-            {"label": "VidLink (Fast HD)", "url": f"https://vidlink.pro/movie/{tid}"},
-            {"label": "2Embed (Multi)", "url": f"https://www.2embed.cc/embed/{tid}"},
-            {"label": "PrimeSrc (Stream)", "url": f"https://primesrc.me/embed/movie?tmdb={tid}"},
+            {"label": "Server 1 (FilmU - Fast HD)", "url": f"https://embed.filmu.in/movie/{tid}"},
+            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/movie/{tid}?autoplay=1&ds_lang=en"},
+            {"label": "Server 3 (Cinesrc - HD)", "url": f"https://cinesrc.st/embed/movie/{tid}"},
+            {"label": "Server 4 (111Movies - Multi)", "url": f"https://111movies.net/movie/{tid}"},
+            {"label": "Server 5 (VidLink - Fast HD)", "url": f"https://vidlink.pro/movie/{tid}"},
+            {"label": "Server 6 (2Embed - Multi)", "url": f"https://www.2embed.cc/embed/{tid}"},
+            {"label": "Server 7 (PrimeSrc - Stream)", "url": f"https://primesrc.me/embed/movie?tmdb={tid}"},
         ]
 
     return StreamInfo(

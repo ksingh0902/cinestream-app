@@ -121,21 +121,23 @@ def parse_player(html: str, page_url: str) -> StreamInfo | None:
                     def _rank(item: dict[str, str]) -> int:
                         u = item["url"].lower()
                         name = (item.get("raw_name") or "").lower()
-                        if "vidsrc.si" in u or "vip" in name:
+                        if "filmu" in u or "filmu" in name:
                             return 0
-                        if "vidfast" in u:
+                        if "vidsrc.si" in u or "vip" in name:
                             return 1
-                        if "vidup" in u:
+                        if "vidfast" in u:
                             return 2
-                        if "vidrock" in u:
+                        if "vidup" in u:
                             return 3
-                        if "123embed" in u:
+                        if "vidrock" in u:
                             return 4
-                        if "2embed" in u:
+                        if "123embed" in u:
                             return 5
-                        if "vidsrc.mov" in u or "vidsrc.fyi" in u:
+                        if "2embed" in u:
                             return 6
-                        return 7
+                        if "vidsrc.mov" in u or "vidsrc.fyi" in u:
+                            return 7
+                        return 8
 
                     dest_urls.sort(key=_rank)
 
@@ -144,7 +146,9 @@ def parse_player(html: str, page_url: str) -> StreamInfo | None:
                         u = d["url"]
                         u_lower = u.lower()
                         raw_name = d.get("raw_name", "")
-                        if "vidsrc.si" in u_lower or "vip" in raw_name.lower():
+                        if "filmu" in u_lower:
+                            lbl = f"Server {i+1} (FilmU - Fast HD)"
+                        elif "vidsrc.si" in u_lower or "vip" in raw_name.lower():
                             lbl = f"Server {i+1} (VIP - No ADS)"
                         elif "vidfast" in u_lower:
                             lbl = f"Server {i+1} (Fast UI - HD)"
