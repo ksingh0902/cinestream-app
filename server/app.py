@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import DB_PATH, STREAM_TTL, UA, SITE_MIRRORS
@@ -522,7 +522,39 @@ async def subtitles(mid: int):
                              "Cache-Control": "public, max-age=86400"})
 
 
-app.mount("/web", StaticFiles(directory=str(Path(__file__).parent.parent / "web")),
-          name="web")
-app.mount("/", StaticFiles(directory=str(Path(__file__).parent / "static"),
-                           html=True), name="static")
+STATIC_DIR = Path(__file__).parent / "static"
+WEB_DIR = Path(__file__).parent.parent / "web"
+
+if WEB_DIR.exists():
+    app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
+
+if STATIC_DIR.exists():
+    # Explicit /assets mount for React production Vite assets (returns 404 for missing assets, not SPA index)
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    # React SPA Fallback Routes for client-side deep linking
+    @app.get("/movie/{full_path:path}")
+    @app.get("/series/{full_path:path}")
+    @app.get("/genre/{full_path:path}")
+    @app.get("/my-list")
+    @app.get("/search")
+    @app.get("/profile")
+    @app.get("/movies")
+    async def serve_react_spa(full_path: str = ""):
+        index_file = STATIC_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend index not found")
+
+    # Serve modern React frontend at root if present, otherwise fallback message
+    @app.get("/")
+    async def serve_root():
+        index_file = STATIC_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        return {"message": "Cinemy API is running"}
+
+    # Mount remaining root static files (favicon.svg, favicon.ico, etc.)
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

@@ -21,6 +21,12 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+Cinemy/node_modules/
+Cinemy/dist/
+Cinemy/test-results/
+Cinemy/coverage/
+Cinemy/scripts/
+Cinemy/.env*
 
 # Scratch and temporary directories
 scratch/
