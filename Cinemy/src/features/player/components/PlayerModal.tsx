@@ -618,32 +618,11 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         )}
 
         {/* 4. Player Container — 16:9 Aspect Ratio, Maximum Width 1040px */}
-        <div
-          className="player-container"
-          id="player-container"
-          tabIndex={0}
-          role="region"
-          aria-label="Video Player"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || (e as any).keyCode === 13) {
-              if (isIframe && iframeRef.current) {
-                iframeRef.current.focus();
-              } else if (videoRef.current) {
-                videoRef.current.focus();
-                if (videoRef.current.paused) {
-                  videoRef.current.play().catch(() => {});
-                } else {
-                  videoRef.current.pause();
-                }
-              }
-            }
-          }}
-        >
+        <div className="player-container" id="player-container">
           {/* HTML5 Native Video for HLS Streams */}
           <video
             ref={videoRef}
             id="v"
-            tabIndex={0}
             controls
             playsInline
             controlsList="noremoteplayback"
@@ -672,7 +651,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           <iframe
             ref={iframeRef}
             id="p-iframe"
-            tabIndex={0}
             key={isIframe ? (activeServer?.url || `iframe-srv-${activeServerIndex}`) : 'iframe-hidden'}
             src={isIframe && activeServer?.url ? activeServer.url : undefined}
             style={{
