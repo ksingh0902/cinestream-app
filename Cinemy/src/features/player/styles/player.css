@@ -17,8 +17,12 @@
   box-sizing: border-box;
 }
 
+html.watch-page,
 body.watch-page {
-  overflow: hidden;
+  overflow: hidden !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .prod-player-box {
@@ -271,6 +275,14 @@ body.watch-page {
   overflow: hidden;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
   margin: 0 auto;
+}
+
+.player-container:focus,
+.player-container:focus-visible,
+.player-container:focus-within {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(249, 115, 22, 0.45) !important;
 }
 
 /* Loading & Error Overlays */

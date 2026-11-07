@@ -443,25 +443,11 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     }
   }, []);
 
-  // Auto-focus overlay on modal open so TV remote D-Pad navigation targets the container immediately
-  useEffect(() => {
-    if (isOpen) {
-      const timer = setTimeout(() => {
-        overlayRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen]);
-
-  // Global keydown listener: TV remote D-Pad navigation and Back/Escape
+  // Global keydown listener: TV Back/Escape support (preserves TV browser spatial navigation)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const tag = (activeEl?.tagName || '').toLowerCase();
-      const isInput = tag === 'input' || tag === 'textarea';
-
       // 1. Escape key / TV Back support (Tizen/WebOS: 10009, 'Back', 'GoBack')
       if (
         e.key === 'Escape' ||
@@ -475,39 +461,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         }
         e.preventDefault();
         handleClose();
-        return;
-      }
-
-      // 2. TV Remote D-Pad Scrolling (Down / PageDown / keyCode 40 / 34)
-      if (
-        (e.key === 'ArrowDown' ||
-          e.key === 'Down' ||
-          (e as any).keyCode === 40 ||
-          e.key === 'PageDown' ||
-          (e as any).keyCode === 34) &&
-        !isInput
-      ) {
-        const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
-        if (!isInsideEpisodes) {
-          e.preventDefault();
-          overlayRef.current?.scrollBy({ top: 300, behavior: 'smooth' });
-        }
-      }
-
-      // 3. TV Remote D-Pad Scrolling (Up / PageUp / keyCode 38 / 33)
-      if (
-        (e.key === 'ArrowUp' ||
-          e.key === 'Up' ||
-          (e as any).keyCode === 38 ||
-          e.key === 'PageUp' ||
-          (e as any).keyCode === 33) &&
-        !isInput
-      ) {
-        const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
-        if (!isInsideEpisodes && overlayRef.current && overlayRef.current.scrollTop > 10) {
-          e.preventDefault();
-          overlayRef.current?.scrollBy({ top: -300, behavior: 'smooth' });
-        }
       }
     };
 
@@ -515,14 +468,17 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, handleClose]);
 
-  // Lock body scroll when watch overlay is open
+  // Lock root document scroll when watch overlay is open (eliminates double scroll)
   useEffect(() => {
     if (isOpen) {
+      document.documentElement.classList.add('watch-page');
       document.body.classList.add('watch-page');
     } else {
+      document.documentElement.classList.remove('watch-page');
       document.body.classList.remove('watch-page');
     }
     return () => {
+      document.documentElement.classList.remove('watch-page');
       document.body.classList.remove('watch-page');
     };
   }, [isOpen]);
@@ -655,11 +611,32 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         )}
 
         {/* 4. Player Container — 16:9 Aspect Ratio, Maximum Width 1040px */}
-        <div className="player-container" id="player-container">
+        <div
+          className="player-container"
+          id="player-container"
+          tabIndex={0}
+          role="region"
+          aria-label="Video Player"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || (e as any).keyCode === 13) {
+              if (isIframe && iframeRef.current) {
+                iframeRef.current.focus();
+              } else if (videoRef.current) {
+                videoRef.current.focus();
+                if (videoRef.current.paused) {
+                  videoRef.current.play().catch(() => {});
+                } else {
+                  videoRef.current.pause();
+                }
+              }
+            }
+          }}
+        >
           {/* HTML5 Native Video for HLS Streams */}
           <video
             ref={videoRef}
             id="v"
+            tabIndex={0}
             controls
             playsInline
             controlsList="noremoteplayback"
@@ -688,6 +665,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           <iframe
             ref={iframeRef}
             id="p-iframe"
+            tabIndex={0}
             key={isIframe ? (activeServer?.url || `iframe-srv-${activeServerIndex}`) : 'iframe-hidden'}
             src={isIframe && activeServer?.url ? activeServer.url : undefined}
             style={{
@@ -698,7 +676,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
               position: 'absolute',
               inset: 0,
             }}
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
             allowFullScreen={true}
             // @ts-ignore
             webkitallowfullscreen="true"
