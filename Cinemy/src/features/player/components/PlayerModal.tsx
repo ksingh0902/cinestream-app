@@ -455,8 +455,15 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         e.key === 'Back' ||
         (e as any).keyCode === 10009
       ) {
-        if (document.fullscreenElement) {
-          // Allow browser to exit native fullscreen naturally
+        const d = document as any;
+        const isFullscreenActive = Boolean(
+          d.fullscreenElement ||
+          d.webkitFullscreenElement ||
+          d.mozFullScreenElement ||
+          d.msFullscreenElement
+        );
+        if (isFullscreenActive) {
+          // Allow browser / WebKit to exit native fullscreen naturally
           return;
         }
         e.preventDefault();
@@ -676,13 +683,13 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
               position: 'absolute',
               inset: 0,
             }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+            allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *"
             allowFullScreen={true}
             // @ts-ignore
             webkitallowfullscreen="true"
             // @ts-ignore
             mozallowfullscreen="true"
-            referrerPolicy="origin"
+            referrerPolicy="no-referrer"
             title="Video Player Stream"
           />
 
