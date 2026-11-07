@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import DB_PATH, STREAM_TTL, UA, SITE_MIRRORS
@@ -522,7 +522,29 @@ async def subtitles(mid: int):
                              "Cache-Control": "public, max-age=86400"})
 
 
+STATIC_DIR = Path(__file__).parent / "static"
+REACT_INDEX_PATH = STATIC_DIR / "index.html"
+
+# Explicit assets mount to guarantee Vite bundles load without prefix interference
+if (STATIC_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
 app.mount("/web", StaticFiles(directory=str(Path(__file__).parent.parent / "web")),
           name="web")
-app.mount("/", StaticFiles(directory=str(Path(__file__).parent / "static"),
+
+# Client-Side SPA Fallback: Serve React index.html on deep links when authenticated
+@app.get("/movie/{full_path:path}")
+@app.get("/series/{full_path:path}")
+@app.get("/genre/{full_path:path}")
+@app.get("/my-list")
+@app.get("/search")
+@app.get("/profile")
+@app.get("/admin")
+@app.get("/movies")
+async def spa_client_route_fallback(request: Request):
+    if REACT_INDEX_PATH.exists():
+        return FileResponse(REACT_INDEX_PATH, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Frontend build not found")
+
+app.mount("/", StaticFiles(directory=str(STATIC_DIR),
                            html=True), name="static")

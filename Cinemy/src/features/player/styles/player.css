@@ -1,0 +1,996 @@
+/* ==========================================================================
+   CINEMY Vanilla-Parity Streaming Player Styles (server/static/index.html)
+   ========================================================================== */
+
+/* Dedicated watch page: one document scroller, no fixed modal or blurred page (Vanilla L2355-2372) */
+html.watch-page,
+body.watch-page {
+  min-height: 100vh;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  max-height: none !important;
+  touch-action: pan-y !important;
+  background: #08090c;
+  margin: 0;
+  padding: 0;
+}
+
+/* Hide background page chrome while watch-page is active so document window is the single scroller */
+body.watch-page .app-container > header,
+body.watch-page .app-container > .main-header,
+body.watch-page .main-content > *:not(#overlay):not(.prod-player-overlay) {
+  display: none !important;
+}
+
+#overlay,
+.prod-player-overlay {
+  position: relative;
+  inset: auto;
+  min-height: 100vh;
+  width: 100%;
+  max-width: none;
+  padding: 18px 22px 90px;
+  overflow: visible !important;
+  overscroll-behavior: auto !important;
+  touch-action: pan-y !important;
+  background: radial-gradient(circle at 50% 20%, rgba(38, 43, 56, 0.42), transparent 52%), #08090c;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  z-index: auto;
+  box-sizing: border-box;
+  display: none;
+}
+
+#overlay.on,
+.prod-player-overlay.on {
+  display: block;
+}
+
+#overlay .box,
+.prod-player-box {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------------------------------
+   1. Watch Navigation Bar (Vanilla L2362-2365)
+   -------------------------------------------------------------------------- */
+.watch-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 14px;
+  gap: 12px;
+}
+
+.btn-watch-back {
+  background: #181c26;
+  border: 1px solid #3e4658;
+  color: #fff;
+  border-radius: 9px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: 0.15s;
+}
+
+.btn-watch-back:hover,
+.btn-watch-back:focus,
+.btn-watch-back:focus-visible {
+  border-color: var(--accent, #ea580c);
+  outline: 3px solid rgba(249, 115, 22, 0.65);
+}
+
+.watch-kicker {
+  color: var(--dim, #94a3b8);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* --------------------------------------------------------------------------
+   2. Title & Action Row (Vanilla L2039-2142)
+   -------------------------------------------------------------------------- */
+.row,
+.prod-player-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin: 10px 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.row h2,
+#p-title,
+.prod-player-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.row > .btn-close {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.btn-group {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+button.btn-action {
+  background: var(--card, #14161d);
+  border: 1px solid var(--border, #262936);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12.5px;
+  transition: 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+button.btn-action:hover {
+  background: var(--card-hover, #1f2330);
+  border-color: #3e4350;
+}
+
+button.btn-action:active {
+  transform: scale(0.97);
+}
+
+button.btn-close {
+  background: var(--accent, #ea580c);
+  border: 0;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  transition: 0.15s;
+}
+
+button.btn-close:hover {
+  background: #ff9359;
+}
+
+button.btn-retry {
+  background: #242732;
+  border: 1px solid var(--accent, #ea580c);
+  color: var(--accent, #ea580c);
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 10px;
+}
+
+button.btn-retry:hover {
+  background: var(--accent, #ea580c);
+  color: #fff;
+}
+
+/* Source & Dub Badges inside #p-title */
+.src-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  color: #fff;
+  vertical-align: middle;
+}
+
+.src-badge.ask {
+  background: #ea580c;
+}
+
+.src-badge.doo {
+  background: #7c3aed;
+}
+
+.src-badge.m7 {
+  background: #d97706;
+}
+
+.src-badge.ym {
+  background: #1d4ed8;
+}
+
+.dub-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  background: #059669;
+  color: #fff;
+  vertical-align: middle;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   3. Server Switcher (Vanilla L2495, L5145-5158)
+   -------------------------------------------------------------------------- */
+#server-switcher,
+.prod-server-switcher {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#server-switcher .pill,
+.prod-server-switcher .pill,
+#alt-source-wrap .pill {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--card, #14161d);
+  border: 1px solid var(--border, #262936);
+  color: var(--txt, #e2e8f0);
+  cursor: pointer;
+  transition: 0.15s;
+  user-select: none;
+}
+
+#server-switcher .pill:hover,
+.prod-server-switcher .pill:hover,
+#alt-source-wrap .pill:hover {
+  border-color: var(--accent, #ea580c);
+  color: #fff;
+}
+
+#server-switcher .pill.active,
+.prod-server-switcher .pill.active {
+  background: var(--accent, #ea580c);
+  border-color: var(--accent, #ea580c);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(255, 123, 57, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   4. Player Container, Video, Iframe & Fullscreen (Vanilla L1866-1942, L2361)
+   -------------------------------------------------------------------------- */
+.player-container {
+  position: relative;
+  width: 100%;
+  max-width: 1040px;
+  max-height: none;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+  margin: 0 auto;
+}
+
+.player-container video,
+#v {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+.player-container iframe,
+.player-container video {
+  pointer-events: auto !important;
+}
+
+.player-container:fullscreen,
+.player-container:-webkit-full-screen,
+.player-container:-moz-full-screen,
+.player-container.is-fullscreen,
+video:fullscreen,
+video:-webkit-full-screen,
+video:-moz-full-screen,
+#p-iframe:fullscreen,
+#p-iframe:-webkit-full-screen,
+#p-iframe:-moz-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+}
+
+.player-container.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 2147483647 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+}
+
+.player-container.is-fullscreen #p-iframe,
+.player-container.is-fullscreen video {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  object-fit: contain !important;
+}
+
+body.player-is-fullscreen {
+  overflow: hidden !important;
+}
+
+.player-container:fullscreen #p-iframe,
+.player-container:-webkit-full-screen #p-iframe,
+.player-container:-moz-full-screen #p-iframe {
+  width: 100vw !important;
+  height: 100vh !important;
+  border: 0 !important;
+}
+
+.player-container:fullscreen video,
+.player-container:-webkit-full-screen video,
+.player-container:-moz-full-screen video {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  object-fit: contain;
+}
+
+/* --------------------------------------------------------------------------
+   5. Floating HUD, Resume Banner & Next Episode Popup (Vanilla L889-1069, L1947-2223)
+   -------------------------------------------------------------------------- */
+#player-hud {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.85);
+  background: rgba(14, 15, 19, 0.88);
+  backdrop-filter: blur(10px);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  padding: 12px 24px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 30;
+}
+
+#player-hud.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+::cue {
+  background-color: rgba(0, 0, 0, 0.85);
+  color: #ffffff;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: 0 2px 4px #000;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+/* Resume Banner Overlay */
+.resume-banner {
+  position: absolute;
+  bottom: 82px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  background: rgba(15, 17, 23, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.85);
+  z-index: 99997;
+  max-width: min(620px, calc(100% - 48px));
+  color: #fff;
+}
+
+.resume-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.resume-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-resume-action {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent, #ea580c);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+  pointer-events: auto !important;
+  white-space: nowrap;
+}
+
+.btn-resume-action:hover {
+  transform: scale(1.05) !important;
+  background: #c2410c !important;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.5) !important;
+}
+
+.btn-resume-action:active {
+  transform: scale(0.97) !important;
+}
+
+.btn-resume-secondary {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #e2e8f0 !important;
+}
+
+.btn-resume-secondary:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: scale(1.04) !important;
+}
+
+.btn-resume-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.btn-resume-close:hover {
+  color: #fff;
+}
+
+/* Next Episode Popup Overlay */
+dialog.next-ep-popup,
+.next-ep-popup {
+  position: absolute;
+  bottom: 84px;
+  right: 24px;
+  left: auto;
+  top: auto;
+  margin: 0;
+  width: auto;
+  height: auto;
+  z-index: 2147483646;
+  background: rgba(15, 17, 23, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.88), 0 0 20px rgba(234, 88, 12, 0.2);
+  pointer-events: auto !important;
+  user-select: none;
+  max-width: 440px;
+}
+
+dialog.next-ep-popup::backdrop,
+.next-ep-popup::backdrop {
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+:fullscreen .next-ep-popup,
+:-webkit-full-screen .next-ep-popup,
+:-moz-full-screen .next-ep-popup,
+#player-container:fullscreen .next-ep-popup,
+#player-container:-webkit-full-screen .next-ep-popup,
+#player-container:-moz-full-screen .next-ep-popup,
+.player-container.is-fullscreen .next-ep-popup,
+body.player-is-fullscreen .next-ep-popup,
+dialog.next-ep-popup[open],
+.next-ep-popup:popover-open {
+  position: fixed !important;
+  inset: auto 32px 96px auto !important;
+  bottom: 96px !important;
+  right: 32px !important;
+  left: auto !important;
+  top: auto !important;
+  margin: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(15, 17, 23, 0.96) !important;
+  color: #fff !important;
+  padding: 12px 16px !important;
+  overflow: visible !important;
+  z-index: 2147483646 !important;
+  display: flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.next-ep-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.next-ep-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #ea580c;
+  text-transform: uppercase;
+}
+
+.next-ep-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.next-ep-meta {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.next-ep-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-next-ep-play {
+  background: #ea580c;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.btn-next-ep-play:hover {
+  background: #f97316;
+  transform: translateY(-1px);
+}
+
+.btn-next-ep-play:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-next-ep-dismiss {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-next-ep-dismiss:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   6. Status Wrap, Scroll Episodes Button & Series Seasons (Vanilla L1830-1856, L2144-2354)
+   -------------------------------------------------------------------------- */
+.status-wrap {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+  min-height: 24px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status,
+.prod-player-status {
+  color: var(--dim, #94a3b8);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent, #ea580c);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-scroll-episodes {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgba(24, 26, 32, 0.94);
+  border: 1.5px solid var(--accent, #ea580c);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 12px auto 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 123, 57, 0.35);
+  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+  z-index: 10;
+}
+
+.btn-scroll-episodes:hover,
+.btn-scroll-episodes:focus,
+.btn-scroll-episodes:focus-visible {
+  transform: scale(1.05);
+  background: var(--accent, #ea580c);
+  color: #fff;
+  outline: 2.5px solid #fff;
+  box-shadow: 0 6px 24px rgba(255, 123, 57, 0.6);
+}
+
+.series-seasons-wrap {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.seasons-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.seasons-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.seasons-count-badge {
+  background: rgba(255, 123, 57, 0.16);
+  color: var(--accent, #ea580c);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.seasons-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.seasons-nav::-webkit-scrollbar {
+  height: 4px;
+}
+
+.seasons-nav::-webkit-scrollbar-thumb {
+  background: var(--border, #262936);
+  border-radius: 2px;
+}
+
+.season-tab-btn {
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--card, #14161d);
+  border: 1px solid var(--border, #262936);
+  color: var(--dim, #94a3b8);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.season-tab-btn:hover {
+  border-color: var(--accent, #ea580c);
+  color: var(--txt, #e2e8f0);
+}
+
+.season-tab-btn.active {
+  background: var(--accent, #ea580c);
+  border-color: var(--accent, #ea580c);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(255, 123, 57, 0.35);
+}
+
+.episodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+  max-height: none;
+  overflow: visible;
+  padding: 3px 2px;
+}
+
+.ep-chip {
+  padding: 8px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  background: var(--card, #14161d);
+  border: 1px solid var(--border, #262936);
+  color: var(--txt, #e2e8f0);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ep-chip:hover {
+  border-color: var(--accent, #ea580c);
+  background: rgba(255, 123, 57, 0.12);
+  color: var(--accent, #ea580c);
+}
+
+.ep-chip.active {
+  background: var(--accent, #ea580c);
+  border-color: var(--accent, #ea580c);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(255, 123, 57, 0.4);
+}
+
+/* TV Remote D-Pad Focus Ring Parity (Vanilla L2337-2354) */
+.season-tab-btn:focus-visible,
+.season-tab-btn:focus,
+.ep-chip:focus-visible,
+.ep-chip:focus,
+.btn-action:focus-visible,
+.btn-action:focus,
+.btn-close:focus-visible,
+.btn-close:focus,
+.btn-retry:focus-visible,
+.btn-retry:focus,
+.btn-watch-back:focus-visible,
+.btn-watch-back:focus,
+.btn-resume-action:focus-visible,
+.btn-resume-action:focus,
+.btn-next-ep-play:focus-visible,
+.btn-next-ep-play:focus,
+.btn-next-ep-dismiss:focus-visible,
+.btn-next-ep-dismiss:focus,
+#server-switcher button:focus-visible,
+#server-switcher button:focus,
+#alt-source-wrap button:focus-visible,
+#alt-source-wrap button:focus {
+  outline: 3px solid #f97316 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 16px rgba(249, 115, 22, 0.85) !important;
+  transform: scale(1.06) !important;
+  z-index: 10;
+}
+
+/* --------------------------------------------------------------------------
+   7. Watch Details & Synopsis (Vanilla L2172-2178, L2367-2371)
+   -------------------------------------------------------------------------- */
+.watch-details {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--border, #262936);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.watch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.watch-meta span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #181c26;
+  border: 1px solid #303644;
+  color: #dbe3ef;
+  font-size: 12px;
+}
+
+.watch-details h3,
+.watch-syn-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.syn,
+.watch-syn-text {
+  color: var(--dim, #94a3b8);
+  max-width: 70ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+/* --------------------------------------------------------------------------
+   8. Mobile Breakpoints (Vanilla L1050-1069, L2111-2142, L2372)
+   -------------------------------------------------------------------------- */
+@media (max-width: 700px) {
+  #overlay,
+  .prod-player-overlay {
+    padding: 12px 10px 60px;
+  }
+
+  #overlay .row,
+  .prod-player-title-row {
+    align-items: flex-start;
+  }
+
+  .btn-watch-back {
+    padding: 9px 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .next-ep-popup,
+  dialog.next-ep-popup[open],
+  .next-ep-popup:popover-open {
+    inset: auto 12px 16px 12px !important;
+    bottom: 16px !important;
+    left: 12px !important;
+    right: 12px !important;
+    max-width: none !important;
+    padding: 10px 12px !important;
+  }
+
+  .next-ep-title {
+    max-width: 150px;
+    font-size: 13px;
+  }
+
+  .btn-next-ep-play {
+    padding: 7px 11px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .row,
+  .prod-player-title-row {
+    align-items: stretch;
+    gap: 8px;
+    margin: 6px 0 10px;
+  }
+
+  .row h2,
+  #p-title,
+  .prod-player-title {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+
+  .btn-group {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    gap: 5px;
+  }
+
+  .row > .btn-close {
+    align-self: start;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+
+  button.btn-action {
+    flex: 1 1 auto;
+    padding: 6px 8px;
+    font-size: 11px;
+    justify-content: center;
+  }
+
+  button.btn-close {
+    padding: 6px 12px;
+    font-size: 11.5px;
+    margin-left: auto;
+  }
+}

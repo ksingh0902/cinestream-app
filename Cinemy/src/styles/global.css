@@ -1,0 +1,59 @@
+@import './tokens.css';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  background-color: var(--bg);
+  color: var(--txt);
+  font-family: var(--font-family);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--bg);
+  color: var(--txt);
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Accessibility: Universal Focus Outline for Keyboard and TV remote navigation */
+button,
+a,
+input,
+select,
+[tabindex="0"] {
+  outline: none;
+}
+
+button:focus-visible:not(.category-tab),
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex="0"]:focus-visible:not(.category-tab) {
+  outline: var(--focus-ring) !important;
+  outline-offset: var(--focus-offset) !important;
+  box-shadow: var(--focus-shadow) !important;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
