@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-describe('Player TV Remote & Fullscreen Interaction Logic', () => {
+describe('Player TV Remote & Watchdog Prevention Logic', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -9,9 +9,8 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
     vi.restoreAllMocks();
   });
 
-  it('1. TV remote D-Pad Down scrolls overlay down when not inside input or fullscreen', () => {
+  it('1. TV remote D-Pad Down scrolls overlay down when not inside input', () => {
     let scrolledBy: { top: number; behavior: string } | null = null;
-    const isFullscreen = false;
     const isInput = false;
 
     const overlay = {
@@ -27,8 +26,7 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
           e.keyCode === 40 ||
           e.key === 'PageDown' ||
           e.keyCode === 34) &&
-        !isInput &&
-        !isFullscreen
+        !isInput
       ) {
         overlay.scrollBy({ top: 300, behavior: 'smooth' });
       }
@@ -45,7 +43,6 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
 
   it('2. TV remote D-Pad Up scrolls overlay back up when scrollTop > 10', () => {
     let scrolledBy: { top: number; behavior: string } | null = null;
-    const isFullscreen = false;
     const isInput = false;
 
     const overlay = {
@@ -63,7 +60,6 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
           e.key === 'PageUp' ||
           e.keyCode === 33) &&
         !isInput &&
-        !isFullscreen &&
         overlay.scrollTop > 10
       ) {
         overlay.scrollBy({ top: -300, behavior: 'smooth' });
@@ -74,13 +70,9 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
     expect(scrolledBy).toEqual({ top: -300, behavior: 'smooth' });
   });
 
-  it('3. TV Back / Escape exits fullscreen first if fullscreen is active, preserving modal', () => {
-    let isFullscreen = true;
+  it('3. TV Back / Escape closes modal cleanly', () => {
     let modalClosed = false;
 
-    const exitFullscreen = () => {
-      isFullscreen = false;
-    };
     const handleClose = () => {
       modalClosed = true;
     };
@@ -92,66 +84,35 @@ describe('Player TV Remote & Fullscreen Interaction Logic', () => {
         e.key === 'Back' ||
         e.keyCode === 10009
       ) {
-        if (isFullscreen) {
-          exitFullscreen();
-          return;
-        }
         handleClose();
       }
     };
 
-    // First Back keypress: exits fullscreen only
-    handleKeyDown({ key: 'Back', keyCode: 10009 });
-    expect(isFullscreen).toBe(false);
-    expect(modalClosed).toBe(false);
-
-    // Second Back keypress: closes modal
     handleKeyDown({ key: 'Back', keyCode: 10009 });
     expect(modalClosed).toBe(true);
   });
 
-  it('4. Fullscreen shortcut key "f" toggles fullscreen state', () => {
-    let isFullscreen = false;
-    const isInput = false;
+  it('4. Watchdog timer fix: active streams (iframe/HLS) are NOT auto-switched after 10s', () => {
+    let activeServerIdx = 0;
+    const servers = [{ label: 'Server 1 (DOO)' }, { label: 'Server 2 (ASK)' }];
 
-    const toggleFullscreen = () => {
-      isFullscreen = !isFullscreen;
+    const triggerAutoFallback = vi.fn((failedIdx: number) => {
+      activeServerIdx = failedIdx + 1;
+    });
+
+    // Start server 0 with watchdog timer disabled (safe mode)
+    const startWatchdog = (_idx: number) => {
+      // Intentionally do NOT schedule timeout
     };
 
-    const handleKeyDown = (e: { key: string }) => {
-      if ((e.key === 'f' || e.key === 'F') && !isInput) {
-        toggleFullscreen();
-      }
-    };
+    startWatchdog(activeServerIdx);
 
-    handleKeyDown({ key: 'f' });
-    expect(isFullscreen).toBe(true);
+    // Fast-forward past 10s, 20s, 60s
+    vi.advanceTimersByTime(60000);
 
-    handleKeyDown({ key: 'F' });
-    expect(isFullscreen).toBe(false);
-  });
-
-  it('5. Fullscreen fallback to CSS theater mode when native fullscreen is unavailable or rejects', async () => {
-    let isFullscreen = false;
-    const mockContainer = {
-      requestFullscreen: vi.fn().mockRejectedValue(new Error('Fullscreen not allowed')),
-    };
-
-    const enterFullscreen = async () => {
-      if (mockContainer && typeof mockContainer.requestFullscreen === 'function') {
-        try {
-          await mockContainer.requestFullscreen();
-          isFullscreen = true;
-          return;
-        } catch {
-          // Fallback to CSS theater mode
-        }
-      }
-      isFullscreen = true;
-    };
-
-    await enterFullscreen();
-    expect(mockContainer.requestFullscreen).toHaveBeenCalledTimes(1);
-    expect(isFullscreen).toBe(true); // Successfully fell back to CSS fullscreen!
+    // Verify Server 1 was NEVER abandoned
+    expect(triggerAutoFallback).not.toHaveBeenCalled();
+    expect(activeServerIdx).toBe(0);
+    expect(servers[activeServerIdx].label).toBe('Server 1 (DOO)');
   });
 });

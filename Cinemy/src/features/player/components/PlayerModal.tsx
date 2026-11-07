@@ -7,8 +7,6 @@ import {
   ChevronDown,
   Zap,
   Radio,
-  Maximize,
-  Minimize,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import {
@@ -52,11 +50,8 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const seasonsSectionRef = useRef<HTMLDivElement | null>(null);
   const detailsRef = useRef<HTMLDivElement | null>(null);
-  const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Active playback target (updates when switching episodes without closing modal)
   const [currentTarget, setCurrentTarget] = useState<PlaybackTarget | null>(target);
@@ -204,48 +199,15 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   );
   triggerAutoFallbackRef.current = triggerAutoFallback;
 
-  // 10-second playback watchdog (matches Vanilla startPlaybackWatchdog)
+  // Playback watchdog (timer auto-switch disabled to prevent disrupting working streams)
   const startWatchdog = useCallback(
-    (serverIdx: number) => {
+    (_serverIdx: number) => {
       clearWatchdog();
-      attemptSeqRef.current += 1;
-      const currentAttempt = attemptSeqRef.current;
-      const capturedContentId = currentTarget?.id;
-
-      watchdogTimerRef.current = setTimeout(() => {
-        if (currentAttempt !== attemptSeqRef.current) return;
-        if (!isOpen || currentTarget?.id !== capturedContentId) return;
-
-        // If playback has already started (video playing or telemetry received), do not switch
-        if (playbackStartedRef.current) return;
-
-        const srv = streamInfoRef.current?.servers?.[serverIdx];
-        if (!srv) {
-          console.warn(`Watchdog: No server found at index ${serverIdx}`);
-          return;
-        }
-
-        const srvKind =
-          srv.kind ||
-          (srv.url?.includes('/proxy/hls') || srv.url?.includes('.m3u8')
-            ? 'hls'
-            : 'iframe');
-
-        let hasStarted = false;
-        if (srvKind === 'iframe') {
-          hasStarted = Boolean(playbackStartedRef.current);
-        } else {
-          const video = videoRef.current;
-          hasStarted = Boolean(video && !video.paused && video.currentTime > 0);
-        }
-
-        if (!hasStarted) {
-          console.warn(`Watchdog: Server ${serverIdx + 1} (${srv.label || ''}) did not start in 10s.`);
-          triggerAutoFallbackRef.current(serverIdx, 'Playback watchdog timeout (10s)');
-        }
-      }, 10000);
+      // Notice: Do NOT automatically switch servers on a timeout.
+      // Third-party iframes (DooFlix, Ask4Movies, etc.) do not report cross-origin
+      // telemetry, which previously caused working streams to be abandoned every 10s.
     },
-    [isOpen, currentTarget?.id, clearWatchdog]
+    [clearWatchdog]
   );
   startWatchdogRef.current = startWatchdog;
 
@@ -449,137 +411,14 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     },
   });
 
-  // Helper to test if standard or vendor native fullscreen is active
-  const isNativeFullscreenActive = (): boolean => {
-    const d = document as any;
-    return Boolean(
-      d.fullscreenElement ||
-      d.webkitFullscreenElement ||
-      d.mozFullScreenElement ||
-      d.msFullscreenElement
-    );
-  };
-
-  // Cross-device Fullscreen Enter with fallbacks (Mobile iOS/Android + Smart TV)
-  const enterFullscreen = useCallback(async () => {
-    const container = playerContainerRef.current;
-    const video = videoRef.current;
-
-    // 1. Try standard / vendor container requestFullscreen
-    if (container) {
-      const req =
-        container.requestFullscreen ||
-        (container as any).webkitRequestFullscreen ||
-        (container as any).mozRequestFullScreen ||
-        (container as any).msRequestFullscreen;
-
-      if (typeof req === 'function') {
-        try {
-          await req.call(container);
-          setIsFullscreen(true);
-
-          // Attempt screen orientation lock on mobile devices supporting ScreenOrientation API
-          try {
-            const orientation: any =
-              screen.orientation ||
-              (screen as any).mozOrientation ||
-              (screen as any).msOrientation;
-            if (orientation && typeof orientation.lock === 'function') {
-              await orientation.lock('landscape').catch(() => {});
-            }
-          } catch {}
-          return;
-        } catch (err) {
-          console.warn('Native container requestFullscreen blocked or unsupported, falling back:', err);
-        }
-      }
-    }
-
-    // 2. iOS Safari Video element fallback (for HTML5 video)
-    if (video && typeof (video as any).webkitEnterFullscreen === 'function' && !isIframe) {
-      try {
-        (video as any).webkitEnterFullscreen();
-        setIsFullscreen(true);
-        return;
-      } catch (err) {
-        console.warn('webkitEnterFullscreen failed:', err);
-      }
-    }
-
-    // 3. Reliable CSS Fullscreen / Theater mode fallback (guaranteed on all TVs and mobiles)
-    setIsFullscreen(true);
-  }, [isIframe]);
-
-  // Exit fullscreen handler
-  const exitFullscreen = useCallback(async () => {
-    const d = document as any;
-    try {
-      const exit =
-        d.exitFullscreen ||
-        d.webkitExitFullscreen ||
-        d.mozCancelFullScreen ||
-        d.msExitFullscreen;
-      if (typeof exit === 'function' && isNativeFullscreenActive()) {
-        await exit.call(d);
-      }
-    } catch (err) {
-      console.warn('exitFullscreen call error:', err);
-    }
-
-    // Unlock screen orientation if locked
-    try {
-      const orientation: any =
-        screen.orientation ||
-        (screen as any).mozOrientation ||
-        (screen as any).msOrientation;
-      if (orientation && typeof orientation.unlock === 'function') {
-        orientation.unlock();
-      }
-    } catch {}
-
-    setIsFullscreen(false);
-  }, []);
-
-  // Toggle fullscreen
-  const toggleFullscreen = useCallback(() => {
-    if (isFullscreen || isNativeFullscreenActive()) {
-      exitFullscreen();
-    } else {
-      enterFullscreen();
-    }
-  }, [isFullscreen, enterFullscreen, exitFullscreen]);
-
-  // Synchronize fullscreen change events across vendor prefixes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const active = isNativeFullscreenActive();
-      setIsFullscreen(active);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-    };
-  }, []);
-
   // Close player handler
   const handleClose = useCallback(() => {
-    if (isFullscreen || isNativeFullscreenActive()) {
-      exitFullscreen();
-    }
     clearWatchdog();
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
     setStatusNotice(null);
     flushProgress();
     onClose();
-  }, [clearWatchdog, flushProgress, onClose, isFullscreen, exitFullscreen]);
+  }, [clearWatchdog, flushProgress, onClose]);
 
   // Server switch handler (resets watchdog timer for selected server)
   const handleSelectServer = useCallback(
@@ -614,7 +453,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     }
   }, [isOpen]);
 
-  // Global keydown listener: TV remote D-Pad navigation, Fullscreen ('f'), and Back/Escape
+  // Global keydown listener: TV remote D-Pad navigation and Back/Escape
   useEffect(() => {
     if (!isOpen) return;
 
@@ -623,38 +462,30 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
       const tag = (activeEl?.tagName || '').toLowerCase();
       const isInput = tag === 'input' || tag === 'textarea';
 
-      // 1. Fullscreen toggle shortcut ('f' / 'F')
-      if ((e.key === 'f' || e.key === 'F') && !isInput) {
-        e.preventDefault();
-        toggleFullscreen();
-        return;
-      }
-
-      // 2. Escape key / TV Back support (Tizen/WebOS: 10009, 'Back', 'GoBack')
+      // 1. Escape key / TV Back support (Tizen/WebOS: 10009, 'Back', 'GoBack')
       if (
         e.key === 'Escape' ||
         e.key === 'GoBack' ||
         e.key === 'Back' ||
         (e as any).keyCode === 10009
       ) {
-        e.preventDefault();
-        if (isFullscreen || isNativeFullscreenActive()) {
-          exitFullscreen();
+        if (document.fullscreenElement) {
+          // Allow browser to exit native fullscreen naturally
           return;
         }
+        e.preventDefault();
         handleClose();
         return;
       }
 
-      // 3. TV Remote D-Pad Scrolling (Down / PageDown / keyCode 40 / 34)
+      // 2. TV Remote D-Pad Scrolling (Down / PageDown / keyCode 40 / 34)
       if (
         (e.key === 'ArrowDown' ||
           e.key === 'Down' ||
           (e as any).keyCode === 40 ||
           e.key === 'PageDown' ||
           (e as any).keyCode === 34) &&
-        !isInput &&
-        !isFullscreen
+        !isInput
       ) {
         const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
         if (!isInsideEpisodes) {
@@ -663,15 +494,14 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         }
       }
 
-      // 4. TV Remote D-Pad Scrolling (Up / PageUp / keyCode 38 / 33)
+      // 3. TV Remote D-Pad Scrolling (Up / PageUp / keyCode 38 / 33)
       if (
         (e.key === 'ArrowUp' ||
           e.key === 'Up' ||
           (e as any).keyCode === 38 ||
           e.key === 'PageUp' ||
           (e as any).keyCode === 33) &&
-        !isInput &&
-        !isFullscreen
+        !isInput
       ) {
         const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
         if (!isInsideEpisodes && overlayRef.current && overlayRef.current.scrollTop > 10) {
@@ -683,7 +513,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isFullscreen, handleClose, toggleFullscreen, exitFullscreen]);
+  }, [isOpen, handleClose]);
 
   // Lock body scroll when watch overlay is open
   useEffect(() => {
@@ -722,7 +552,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
   return (
     <div
-      className={`prod-player-overlay ${isFullscreen ? 'overlay-fullscreen' : ''}`}
+      className="prod-player-overlay"
       ref={overlayRef}
       tabIndex={-1}
       style={{ outline: 'none' }}
@@ -741,22 +571,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           </button>
 
           <div className="watch-nav-right">
-            {/* Fullscreen Toggle Button */}
-            <button
-              type="button"
-              className="btn-fullscreen"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}
-              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-            >
-              {isFullscreen ? (
-                <Minimize size={15} strokeWidth={2} />
-              ) : (
-                <Maximize size={15} strokeWidth={2} />
-              )}
-              <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
-            </button>
-
             {isSeries && hasSeasons ? (
               <button
                 type="button"
@@ -841,25 +655,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         )}
 
         {/* 4. Player Container — 16:9 Aspect Ratio, Maximum Width 1040px */}
-        <div
-          className={`player-container ${isFullscreen ? 'is-fullscreen' : ''}`}
-          id="player-container"
-          ref={playerContainerRef}
-        >
-          {/* Floating Fullscreen Toggle Button (Visible on Touch, TV & Desktop) */}
-          <button
-            type="button"
-            className={`btn-player-fullscreen-toggle ${isFullscreen ? 'in-fullscreen' : ''}`}
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}
-            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? (
-              <Minimize size={18} strokeWidth={2.2} />
-            ) : (
-              <Maximize size={18} strokeWidth={2.2} />
-            )}
-          </button>
+        <div className="player-container" id="player-container">
           {/* HTML5 Native Video for HLS Streams */}
           <video
             ref={videoRef}
@@ -902,13 +698,13 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
               position: 'absolute',
               inset: 0,
             }}
-            allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen={true}
             // @ts-ignore
             webkitallowfullscreen="true"
             // @ts-ignore
             mozallowfullscreen="true"
-            referrerPolicy="no-referrer"
+            referrerPolicy="origin"
             title="Video Player Stream"
           />
 
