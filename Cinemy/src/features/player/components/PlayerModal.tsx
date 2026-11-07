@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, X, Languages, Tv, ChevronDown, Zap, Radio } from 'lucide-react';
+import {
+  ArrowLeft,
+  X,
+  Languages,
+  Tv,
+  ChevronDown,
+  Zap,
+  Radio,
+  Maximize,
+  Minimize,
+} from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import {
   resolveContinueWatchingKey,
@@ -41,8 +51,12 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const seasonsSectionRef = useRef<HTMLDivElement | null>(null);
+  const detailsRef = useRef<HTMLDivElement | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Active playback target (updates when switching episodes without closing modal)
   const [currentTarget, setCurrentTarget] = useState<PlaybackTarget | null>(target);
@@ -435,14 +449,137 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     },
   });
 
+  // Helper to test if standard or vendor native fullscreen is active
+  const isNativeFullscreenActive = (): boolean => {
+    const d = document as any;
+    return Boolean(
+      d.fullscreenElement ||
+      d.webkitFullscreenElement ||
+      d.mozFullScreenElement ||
+      d.msFullscreenElement
+    );
+  };
+
+  // Cross-device Fullscreen Enter with fallbacks (Mobile iOS/Android + Smart TV)
+  const enterFullscreen = useCallback(async () => {
+    const container = playerContainerRef.current;
+    const video = videoRef.current;
+
+    // 1. Try standard / vendor container requestFullscreen
+    if (container) {
+      const req =
+        container.requestFullscreen ||
+        (container as any).webkitRequestFullscreen ||
+        (container as any).mozRequestFullScreen ||
+        (container as any).msRequestFullscreen;
+
+      if (typeof req === 'function') {
+        try {
+          await req.call(container);
+          setIsFullscreen(true);
+
+          // Attempt screen orientation lock on mobile devices supporting ScreenOrientation API
+          try {
+            const orientation: any =
+              screen.orientation ||
+              (screen as any).mozOrientation ||
+              (screen as any).msOrientation;
+            if (orientation && typeof orientation.lock === 'function') {
+              await orientation.lock('landscape').catch(() => {});
+            }
+          } catch {}
+          return;
+        } catch (err) {
+          console.warn('Native container requestFullscreen blocked or unsupported, falling back:', err);
+        }
+      }
+    }
+
+    // 2. iOS Safari Video element fallback (for HTML5 video)
+    if (video && typeof (video as any).webkitEnterFullscreen === 'function' && !isIframe) {
+      try {
+        (video as any).webkitEnterFullscreen();
+        setIsFullscreen(true);
+        return;
+      } catch (err) {
+        console.warn('webkitEnterFullscreen failed:', err);
+      }
+    }
+
+    // 3. Reliable CSS Fullscreen / Theater mode fallback (guaranteed on all TVs and mobiles)
+    setIsFullscreen(true);
+  }, [isIframe]);
+
+  // Exit fullscreen handler
+  const exitFullscreen = useCallback(async () => {
+    const d = document as any;
+    try {
+      const exit =
+        d.exitFullscreen ||
+        d.webkitExitFullscreen ||
+        d.mozCancelFullScreen ||
+        d.msExitFullscreen;
+      if (typeof exit === 'function' && isNativeFullscreenActive()) {
+        await exit.call(d);
+      }
+    } catch (err) {
+      console.warn('exitFullscreen call error:', err);
+    }
+
+    // Unlock screen orientation if locked
+    try {
+      const orientation: any =
+        screen.orientation ||
+        (screen as any).mozOrientation ||
+        (screen as any).msOrientation;
+      if (orientation && typeof orientation.unlock === 'function') {
+        orientation.unlock();
+      }
+    } catch {}
+
+    setIsFullscreen(false);
+  }, []);
+
+  // Toggle fullscreen
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen || isNativeFullscreenActive()) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  }, [isFullscreen, enterFullscreen, exitFullscreen]);
+
+  // Synchronize fullscreen change events across vendor prefixes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = isNativeFullscreenActive();
+      setIsFullscreen(active);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
   // Close player handler
   const handleClose = useCallback(() => {
+    if (isFullscreen || isNativeFullscreenActive()) {
+      exitFullscreen();
+    }
     clearWatchdog();
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
     setStatusNotice(null);
     flushProgress();
     onClose();
-  }, [clearWatchdog, flushProgress, onClose]);
+  }, [clearWatchdog, flushProgress, onClose, isFullscreen, exitFullscreen]);
 
   // Server switch handler (resets watchdog timer for selected server)
   const handleSelectServer = useCallback(
@@ -467,29 +604,86 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     }
   }, []);
 
-  // Escape key listener & TV Back support (only closes when not in browser fullscreen)
+  // Auto-focus overlay on modal open so TV remote D-Pad navigation targets the container immediately
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        overlayRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+
+  // Global keydown listener: TV remote D-Pad navigation, Fullscreen ('f'), and Back/Escape
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const tag = (activeEl?.tagName || '').toLowerCase();
+      const isInput = tag === 'input' || tag === 'textarea';
+
+      // 1. Fullscreen toggle shortcut ('f' / 'F')
+      if ((e.key === 'f' || e.key === 'F') && !isInput) {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+
+      // 2. Escape key / TV Back support (Tizen/WebOS: 10009, 'Back', 'GoBack')
       if (
         e.key === 'Escape' ||
         e.key === 'GoBack' ||
         e.key === 'Back' ||
         (e as any).keyCode === 10009
       ) {
-        if (document.fullscreenElement) {
-          // Allow browser to exit fullscreen naturally
+        e.preventDefault();
+        if (isFullscreen || isNativeFullscreenActive()) {
+          exitFullscreen();
           return;
         }
-        e.preventDefault();
         handleClose();
+        return;
+      }
+
+      // 3. TV Remote D-Pad Scrolling (Down / PageDown / keyCode 40 / 34)
+      if (
+        (e.key === 'ArrowDown' ||
+          e.key === 'Down' ||
+          (e as any).keyCode === 40 ||
+          e.key === 'PageDown' ||
+          (e as any).keyCode === 34) &&
+        !isInput &&
+        !isFullscreen
+      ) {
+        const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
+        if (!isInsideEpisodes) {
+          e.preventDefault();
+          overlayRef.current?.scrollBy({ top: 300, behavior: 'smooth' });
+        }
+      }
+
+      // 4. TV Remote D-Pad Scrolling (Up / PageUp / keyCode 38 / 33)
+      if (
+        (e.key === 'ArrowUp' ||
+          e.key === 'Up' ||
+          (e as any).keyCode === 38 ||
+          e.key === 'PageUp' ||
+          (e as any).keyCode === 33) &&
+        !isInput &&
+        !isFullscreen
+      ) {
+        const isInsideEpisodes = activeEl?.closest?.('.episodes-grid, .seasons-nav');
+        if (!isInsideEpisodes && overlayRef.current && overlayRef.current.scrollTop > 10) {
+          e.preventDefault();
+          overlayRef.current?.scrollBy({ top: -300, behavior: 'smooth' });
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleClose]);
+  }, [isOpen, isFullscreen, handleClose, toggleFullscreen, exitFullscreen]);
 
   // Lock body scroll when watch overlay is open
   useEffect(() => {
@@ -527,7 +721,12 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   };
 
   return (
-    <div className="prod-player-overlay" ref={overlayRef}>
+    <div
+      className={`prod-player-overlay ${isFullscreen ? 'overlay-fullscreen' : ''}`}
+      ref={overlayRef}
+      tabIndex={-1}
+      style={{ outline: 'none' }}
+    >
       <div className="prod-player-box">
         {/* 1. Top Navigation Bar — In normal document flow above player */}
         <div className="watch-nav">
@@ -542,7 +741,23 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           </button>
 
           <div className="watch-nav-right">
-            {isSeries && hasSeasons && (
+            {/* Fullscreen Toggle Button */}
+            <button
+              type="button"
+              className="btn-fullscreen"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? (
+                <Minimize size={15} strokeWidth={2} />
+              ) : (
+                <Maximize size={15} strokeWidth={2} />
+              )}
+              <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
+            </button>
+
+            {isSeries && hasSeasons ? (
               <button
                 type="button"
                 className="btn-scroll-episodes"
@@ -552,6 +767,18 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
                 <Tv size={14} strokeWidth={1.5} />
                 <span>Episodes & Seasons</span>
                 <ChevronDown size={14} strokeWidth={1.5} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-scroll-details"
+                onClick={() => {
+                  detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                title="Jump down to Movie Details"
+              >
+                <ChevronDown size={14} strokeWidth={1.5} />
+                <span>Details</span>
               </button>
             )}
             <button
@@ -614,7 +841,25 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         )}
 
         {/* 4. Player Container — 16:9 Aspect Ratio, Maximum Width 1040px */}
-        <div className="player-container" id="player-container">
+        <div
+          className={`player-container ${isFullscreen ? 'is-fullscreen' : ''}`}
+          id="player-container"
+          ref={playerContainerRef}
+        >
+          {/* Floating Fullscreen Toggle Button (Visible on Touch, TV & Desktop) */}
+          <button
+            type="button"
+            className={`btn-player-fullscreen-toggle ${isFullscreen ? 'in-fullscreen' : ''}`}
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}
+            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? (
+              <Minimize size={18} strokeWidth={2.2} />
+            ) : (
+              <Maximize size={18} strokeWidth={2.2} />
+            )}
+          </button>
           {/* HTML5 Native Video for HLS Streams */}
           <video
             ref={videoRef}
@@ -718,6 +963,26 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           </span>
         </div>
 
+        {/* TV Remote & Touch Scroll Cue (Navigates down to episodes or details on D-pad) */}
+        <button
+          type="button"
+          className="player-scroll-hint"
+          onClick={() => {
+            if (seasonsSectionRef.current) {
+              seasonsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else if (detailsRef.current) {
+              detailsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+              overlayRef.current?.scrollBy({ top: 350, behavior: 'smooth' });
+            }
+          }}
+          aria-label={isSeries && hasSeasons ? 'Jump down to episodes' : 'Scroll down for details'}
+        >
+          <ChevronDown size={14} strokeWidth={2} />
+          <span>{isSeries && hasSeasons ? 'View Episodes & Seasons' : 'Scroll down for Details'}</span>
+          <ChevronDown size={14} strokeWidth={2} />
+        </button>
+
         {/* 6. Series Seasons & Episodes Grid — In normal document flow below player */}
         {isSeries && hasSeasons && (
           <div
@@ -784,7 +1049,14 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         )}
 
         {/* 7. Details / Synopsis Section — In normal document flow below episodes */}
-        <div className="watch-details">
+        <div
+          className="watch-details"
+          ref={detailsRef}
+          tabIndex={0}
+          onFocus={(e) => {
+            e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }}
+        >
           <div className="watch-meta">
             {(movieMeta?.rating || currentTarget.rating) && (
               <span>Rating {movieMeta?.rating || currentTarget.rating}</span>
