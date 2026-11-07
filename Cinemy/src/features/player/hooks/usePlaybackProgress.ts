@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   resolveContinueWatchingKey,
   saveContinueWatchingRecord,
+  removeContinueWatchingRecord,
 } from '../../continue-watching/storage';
 import { PlaybackTarget } from '../types';
 import { buildContentId, isPermittedIframeOrigin } from '../services/playerService';
@@ -43,6 +44,9 @@ export function usePlaybackProgress({
 
   const lastSaveTimeRef = useRef<number>(0);
   const prevTargetRef = useRef<PlaybackTarget | null>(null);
+  const iframeBaseOffsetRef = useRef<number>(target?.resumeTime || 0);
+  const iframeWatchStartRef = useRef<number>(Date.now());
+
   const progressRef = useRef({
     currentTime: target?.resumeTime || 0,
     duration: null as number | null,
@@ -50,7 +54,6 @@ export function usePlaybackProgress({
     isEnded: false,
   });
 
-  // Keep progressRef in sync with React state
   progressRef.current = {
     currentTime,
     duration,
@@ -73,79 +76,112 @@ export function usePlaybackProgress({
         const prevContentId = buildContentId(prev);
         const isSeries = Boolean(prev.isSeries);
         const validDuration =
-          Number.isFinite(dur) && (dur ?? 0) > 0 ? Math.floor(dur!) : null;
+          Number.isFinite(dur) && (dur ?? 0) > 0 ? Math.floor(dur!) : (prev.duration_s || null);
 
-        saveContinueWatchingRecord(scopedKey, {
-          contentId: prevContentId,
-          id: prev.id,
-          series_id: isSeries ? (prev.canonicalSeriesId || prev.id) : null,
-          title: prev.title,
-          poster: prev.poster || null,
-          year: prev.year || null,
-          is_series: isSeries,
-          season: isSeries ? (prev.season ?? 1) : null,
-          episode: isSeries ? (prev.episode ?? 1) : null,
-          source: prev.source || 'yomovies',
-          is_hindi_dubbed: Boolean(prev.isHindiDubbed),
-          currentTime: Math.floor(cur),
-          duration: validDuration,
-          hasVerifiedDuration: Boolean(verified && validDuration),
-          progressPct:
-            validDuration && validDuration > 0
-              ? Math.min(100, Math.round((cur / validDuration) * 100))
-              : 0,
-          isCompleted: ended || (validDuration ? (cur / validDuration) >= 0.9 : false),
-          updatedAt: Date.now(),
-        });
+        if (!isSeries && verified && validDuration && validDuration >= 300 && cur / validDuration >= 0.95) {
+          removeContinueWatchingRecord(scopedKey, prevContentId);
+        } else {
+          saveContinueWatchingRecord(scopedKey, {
+            contentId: prevContentId,
+            id: prev.id,
+            series_id: isSeries ? (prev.canonicalSeriesId || prev.id) : null,
+            title: prev.title,
+            poster: prev.poster || null,
+            year: prev.year || null,
+            is_series: isSeries,
+            season: isSeries ? (prev.season ?? 1) : null,
+            episode: isSeries ? (prev.episode ?? 1) : null,
+            source: prev.source || 'yomovies',
+            is_hindi_dubbed: Boolean(prev.isHindiDubbed),
+            currentTime: Math.floor(cur),
+            duration: validDuration,
+            hasVerifiedDuration: Boolean(verified && validDuration),
+            progressPct:
+              validDuration && validDuration > 0
+                ? Math.min(100, Math.round((cur / validDuration) * 100))
+                : 0,
+            isCompleted: isSeries ? Boolean(ended) : false,
+            updatedAt: Date.now(),
+          });
+        }
       }
 
-      // Reset telemetry for new target
-      setCurrentTime(target.resumeTime || 0);
+      const initResume = target.resumeTime || 0;
+      setCurrentTime(initResume);
       setDuration(null);
       setHasVerifiedDuration(false);
       setIsEnded(false);
       lastSaveTimeRef.current = 0;
+      iframeBaseOffsetRef.current = initResume;
+      iframeWatchStartRef.current = Date.now();
       progressRef.current = {
-        currentTime: target.resumeTime || 0,
+        currentTime: initResume,
         duration: null,
         hasVerifiedDuration: false,
         isEnded: false,
       };
+    } else if (!prev && target) {
+      const initResume = target.resumeTime || 0;
+      iframeBaseOffsetRef.current = initResume;
+      iframeWatchStartRef.current = Date.now();
     }
     prevTargetRef.current = target;
   }, [target, scopedKey]);
 
-  // Unified save progress callback with explicit value overrides to avoid React closure lag
+  // Unified save progress callback matching Vanilla savePlaybackProgress (L3564-3666)
   const saveProgress = useCallback(
     (force: boolean = false, overrideCur?: number, overrideDur?: number | null) => {
       if (!target) return;
 
       const cur = overrideCur !== undefined ? overrideCur : progressRef.current.currentTime;
-      const dur = overrideDur !== undefined ? overrideDur : progressRef.current.duration;
+      const dur =
+        overrideDur !== undefined
+          ? overrideDur
+          : progressRef.current.duration ?? (target.duration_s || null);
       const verified = progressRef.current.hasVerifiedDuration;
       const ended = progressRef.current.isEnded;
 
-      // Do not save negligible initial playback (< 5s) unless already marked ended
       if (cur < 5 && !ended) return;
-
-      // Throttle non-forced saves to roughly every 10 seconds
-      if (!force && !ended && lastSaveTimeRef.current > 0 && Math.abs(cur - lastSaveTimeRef.current) < 9.5) {
-        return;
-      }
-      lastSaveTimeRef.current = cur;
 
       const contentId = buildContentId(target);
       const isSeries = Boolean(target.isSeries);
       const validDuration =
         Number.isFinite(dur) && (dur ?? 0) > 0 ? Math.floor(dur!) : null;
 
+      // 1. Movies: 95% completion threshold removes item from Continue Watching (Vanilla L3616-3628)
+      if (!isSeries) {
+        const isCompletedMovie =
+          ended ||
+          Boolean(
+            verified &&
+              validDuration &&
+              validDuration >= 300 &&
+              cur / validDuration >= 0.95
+          );
+        if (isCompletedMovie) {
+          removeContinueWatchingRecord(scopedKey, contentId);
+          return;
+        }
+      }
+
+      // Throttle non-forced saves to roughly every 10 seconds (Vanilla L3636-3640)
+      if (
+        !force &&
+        !ended &&
+        lastSaveTimeRef.current > 0 &&
+        Math.abs(cur - lastSaveTimeRef.current) < 9.5
+      ) {
+        return;
+      }
+      lastSaveTimeRef.current = cur;
+
       const progressPct =
         validDuration && validDuration > 0
           ? Math.min(100, Math.round((cur / validDuration) * 100))
           : 0;
 
-      // Mark completed if >= 90% or ended
-      const isCompleted = ended || (validDuration ? (cur / validDuration) >= 0.9 : false);
+      // 2. Web Series Episodes: ONLY genuine ended events mark completion (Vanilla L3630-3634)
+      const isCompleted = isSeries ? Boolean(ended) : false;
 
       saveContinueWatchingRecord(scopedKey, {
         contentId,
@@ -161,8 +197,8 @@ export function usePlaybackProgress({
         is_hindi_dubbed: Boolean(target.isHindiDubbed),
         currentTime: Math.floor(cur),
         duration: validDuration,
-        hasVerifiedDuration: Boolean((verified || Boolean(validDuration)) && validDuration),
-        progressPct,
+        hasVerifiedDuration: Boolean(verified && validDuration),
+        progressPct: isCompleted ? 100 : progressPct,
         isCompleted,
         updatedAt: Date.now(),
       });
@@ -174,7 +210,7 @@ export function usePlaybackProgress({
     saveProgress(true);
   }, [saveProgress]);
 
-  // Native HTML5 Video telemetry listeners
+  // Native HTML5 Video telemetry listeners (Vanilla L3730-3772)
   useEffect(() => {
     if (isIframe) return;
     const video = videoRef.current;
@@ -189,7 +225,6 @@ export function usePlaybackProgress({
         onPlaybackStartedRef.current?.();
       }
 
-      // Update progressRef synchronously
       progressRef.current.currentTime = cur;
       if (dur) {
         progressRef.current.duration = dur;
@@ -238,16 +273,43 @@ export function usePlaybackProgress({
     };
   }, [isIframe, videoRef, streamSrc, isResolving, saveProgress, onEnded]);
 
-  // Permitted iframe postMessage telemetry listener (e.g. Server 2 VIP VidSrc)
+  // Vanilla startIframeWatchTracker (L2844-2880): 1s wall-clock tracker for embeds without postMessage
+  useEffect(() => {
+    if (!isIframe || !target || isResolving) return;
+    iframeWatchStartRef.current = Date.now();
+    iframeBaseOffsetRef.current = progressRef.current.currentTime || target.resumeTime || 0;
+
+    const interval = setInterval(() => {
+      const frame = iframeRef.current;
+      if (!frame || frame.style.display === 'none') return;
+      if (document.visibilityState !== 'visible') return;
+      if (progressRef.current.hasVerifiedDuration && progressRef.current.currentTime > 0) {
+        return;
+      }
+
+      const elapsed = Math.floor((Date.now() - iframeWatchStartRef.current) / 1000);
+      const activeWatchTime = (iframeBaseOffsetRef.current || 0) + elapsed;
+      progressRef.current.currentTime = activeWatchTime;
+      setCurrentTime(activeWatchTime);
+
+      if (activeWatchTime >= 5) {
+        saveProgress(false, activeWatchTime, target.duration_s || null);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isIframe, target, isResolving, iframeRef, saveProgress]);
+
+  // Permitted iframe postMessage telemetry listener (Vanilla L6065-6171)
   useEffect(() => {
     if (!isIframe) return;
 
     const handleMessage = (event: MessageEvent) => {
       try {
         const frame = iframeRef.current;
-        if (!frame) return;
+        if (!frame || frame.style.display === 'none') return;
+        if (frame.contentWindow && event.source !== frame.contentWindow) return;
 
-        // Origin validation: strictly check activeIframeOrigin or approved embed hostnames
         if (activeIframeOrigin) {
           if (event.origin !== activeIframeOrigin) return;
         } else if (!isPermittedIframeOrigin(event.origin)) {
@@ -262,9 +324,8 @@ export function usePlaybackProgress({
             return;
           }
         }
-        if (!data || typeof data !== 'object') return;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) return;
 
-        // Parse duration and time from standard embed telemetry protocols
         const rawCurTime =
           data.currentTime ??
           data.data?.currentTime ??
@@ -285,7 +346,12 @@ export function usePlaybackProgress({
         const tot = Number(rawDuration);
 
         const hasValidCur = Number.isFinite(cur) && cur >= 0 && cur <= 172800;
-        const hasValidDur = Number.isFinite(tot) && tot > 0 && tot <= 172800;
+        // Vanilla L6100: Duration must be >= 300s to filter out ad frames
+        const hasValidDur = Number.isFinite(tot) && tot >= 300 && tot <= 172800;
+
+        if (hasValidCur && hasValidDur && cur > tot + 5) {
+          return;
+        }
 
         if (hasValidDur) {
           setDuration(tot);
@@ -293,17 +359,17 @@ export function usePlaybackProgress({
           progressRef.current.duration = tot;
           progressRef.current.hasVerifiedDuration = true;
           onPlaybackStartedRef.current?.();
-        }
-
-        if (hasValidCur) {
-          setCurrentTime(cur);
-          progressRef.current.currentTime = cur;
-          if (cur > 0) {
-            onPlaybackStartedRef.current?.();
+          if (hasValidCur) {
+            setCurrentTime(cur);
+            progressRef.current.currentTime = cur;
+          }
+        } else if (hasValidCur && progressRef.current.hasVerifiedDuration) {
+          if (cur <= (progressRef.current.duration || 0) + 5) {
+            setCurrentTime(cur);
+            progressRef.current.currentTime = cur;
           }
         }
 
-        // Check ended signals
         const evt = (
           data.event ||
           data.type ||
@@ -323,13 +389,13 @@ export function usePlaybackProgress({
           evt === 'finish' ||
           (data.data && String(data.data.player_status).toLowerCase() === 'ended');
 
-        if (isEndedMsg) {
+        if (isEndedMsg && (progressRef.current.duration || 0) >= 300) {
           setIsEnded(true);
           progressRef.current.isEnded = true;
           saveProgress(true, cur, hasValidDur ? tot : progressRef.current.duration);
           onEnded?.();
-        } else if (hasValidCur && cur >= 5) {
-          saveProgress(false, cur, hasValidDur ? tot : progressRef.current.duration);
+        } else if (progressRef.current.hasVerifiedDuration && progressRef.current.currentTime >= 5) {
+          saveProgress(false, progressRef.current.currentTime, progressRef.current.duration);
         }
       } catch {}
     };
@@ -340,24 +406,25 @@ export function usePlaybackProgress({
     };
   }, [isIframe, activeIframeOrigin, iframeRef, saveProgress, onEnded]);
 
-  // Page visibility change / unload save
+  // Page visibility change / pagehide / beforeunload save (Vanilla L3773-3777)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         saveProgress(true);
       }
     };
-
-    const handleBeforeUnload = () => {
+    const handlePageHide = () => {
       saveProgress(true);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
       saveProgress(true);
     };
   }, [saveProgress]);

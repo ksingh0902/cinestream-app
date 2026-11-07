@@ -120,6 +120,15 @@ export function useTVNav({ onBack, isPlayerOpen }: UseTVNavOptions = {}) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If player overlay is open, let PlayerModal handle all remote/keyboard navigation (Vanilla L6214 parity)
+      if (
+        isPlayerOpen ||
+        document.body.classList.contains('watch-page') ||
+        document.querySelector('#overlay.on, .prod-player-overlay')
+      ) {
+        return;
+      }
+
       // 1. Back / Escape Navigation
       if (
         e.key === 'Escape' ||
@@ -132,12 +141,6 @@ export function useTVNav({ onBack, isPlayerOpen }: UseTVNavOptions = {}) {
         const searchDropdown = document.querySelector('.search-dropdown');
         if (searchDropdown && document.activeElement === searchInput) {
           // Handled by search input's onKeyDown
-          return;
-        }
-
-        // If player modal is open, let PlayerModal handle its close
-        if (isPlayerOpen || document.querySelector('.prod-player-overlay')) {
-          // Handled by PlayerModal
           return;
         }
 
