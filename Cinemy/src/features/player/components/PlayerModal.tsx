@@ -133,7 +133,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
   // Fullscreen & Episode Fullscreen Preservation state (Vanilla L4689-4737, L5434-5602)
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
+  const [, setIsVideoPlaying] = useState<boolean>(false);
   const lastIframeSrcRef = useRef<string>('about:blank');
   const isPreservingEpisodeFsRef = useRef<boolean>(false);
   const episodeFsPreserveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -306,10 +306,9 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     }
     lastIframeSrcRef.current = url;
     try {
+      pIframe.src = url;
       if (pIframe.contentWindow && pIframe.contentWindow.location) {
         pIframe.contentWindow.location.replace(url);
-      } else {
-        pIframe.src = url;
       }
     } catch {
       pIframe.src = url;
@@ -2110,9 +2109,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       homeScrollYRef.current = window.scrollY || 0;
-      document.documentElement.classList.remove('modal-open');
       document.body.classList.remove('modal-open');
-      document.documentElement.classList.add('watch-page');
       document.body.classList.add('watch-page');
       window.scrollTo({ top: 0, behavior: 'auto' });
 
@@ -2127,7 +2124,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
       return () => {
         clearTimeout(focusTimer);
-        document.documentElement.classList.remove('watch-page');
         document.body.classList.remove('watch-page');
         const savedScroll = homeScrollYRef.current;
         if (savedScroll > 0) {
@@ -2135,7 +2131,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         }
       };
     } else {
-      document.documentElement.classList.remove('watch-page');
       document.body.classList.remove('watch-page');
     }
   }, [isOpen]);
@@ -2222,8 +2217,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
       id="overlay"
       className="prod-player-overlay on"
       ref={overlayRef}
-      tabIndex={-1}
-      style={{ outline: 'none' }}
     >
       <div className="box prod-player-box">
         {/* 1. Watch Navigation Bar (Vanilla L2482-2485) */}
@@ -2261,30 +2254,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           </button>
           <div className="btn-group">
             <button
-              id="btn-play-pause"
-              type="button"
-              className="btn-action"
-              style={{ display: isIframe ? 'none' : 'inline-flex' }}
-              onClick={() => {
-                const video = videoRef.current;
-                if (!video) return;
-                if (video.paused || video.ended) {
-                  video.play().catch(() => {});
-                  isActivelyPlayingRef.current = true;
-                  setIsVideoPlaying(true);
-                  showHud('▶ Play');
-                } else {
-                  video.pause();
-                  isActivelyPlayingRef.current = false;
-                  setIsVideoPlaying(false);
-                  showHud('⏸ Pause');
-                }
-              }}
-              title="Play / Pause (Space or K)"
-            >
-              {isVideoPlaying ? '⏸ Pause' : '▶ Play'}
-            </button>
-            <button
               id="btn-rewind"
               type="button"
               className="btn-action"
@@ -2313,16 +2282,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
               title="Toggle English Subtitles (Press C)"
             >
               CC: English ({ccEnabled ? 'ON' : 'OFF'})
-            </button>
-            <button
-              id="player-fullscreen-toggle"
-              type="button"
-              className="btn-action"
-              onClick={togglePlayerFullscreen}
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              title={isFullscreen ? 'Exit Fullscreen (Escape or F)' : 'Fullscreen (Press F)'}
-            >
-              ⛶ <span className="player-fs-label">{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
             </button>
           </div>
         </div>
@@ -2399,6 +2358,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           <iframe
             ref={iframeRef}
             id="p-iframe"
+            src={isIframe && activeServer?.url ? activeServer.url : undefined}
             style={{
               display: isIframe ? 'block' : 'none',
               width: '100%',
@@ -2406,6 +2366,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
               border: 0,
               position: 'absolute',
               inset: 0,
+              zIndex: 1,
             }}
             allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; gyroscope *; picture-in-picture *; web-share *; fullscreen *"
             allowFullScreen={true}

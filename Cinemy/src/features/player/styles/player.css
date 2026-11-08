@@ -3,14 +3,13 @@
    ========================================================================== */
 
 /* Dedicated watch page: one document scroller, no fixed modal or blurred page (Vanilla L2355-2372) */
-html.watch-page,
 body.watch-page {
   min-height: 100vh;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   height: auto !important;
   max-height: none !important;
-  touch-action: auto !important;
+  touch-action: pan-y !important;
   background: #08090c;
   margin: 0;
   padding: 0;
@@ -33,7 +32,7 @@ body.watch-page .main-content > *:not(#overlay):not(.prod-player-overlay) {
   padding: 18px 22px 90px;
   overflow: visible !important;
   overscroll-behavior: auto !important;
-  touch-action: auto !important;
+  touch-action: pan-y !important;
   background: radial-gradient(circle at 50% 20%, rgba(38, 43, 56, 0.42), transparent 52%), #08090c;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -306,7 +305,6 @@ button.btn-retry:hover {
 .player-container iframe,
 .player-container video {
   pointer-events: auto !important;
-  touch-action: auto !important;
 }
 
 .player-container:fullscreen,
@@ -399,11 +397,13 @@ body.player-is-fullscreen {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
   pointer-events: none;
   opacity: 0;
+  display: none;
   transition: opacity 0.15s, transform 0.15s;
   z-index: 30;
 }
 
 #player-hud.show {
+  display: block;
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
 }
