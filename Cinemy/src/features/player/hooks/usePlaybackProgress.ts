@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import {
   resolveContinueWatchingKey,
+  getContinueWatchingRecord,
   saveContinueWatchingRecord,
   removeContinueWatchingRecord,
 } from '../../continue-watching/storage';
@@ -46,6 +47,7 @@ export function usePlaybackProgress({
   const prevTargetRef = useRef<PlaybackTarget | null>(null);
   const iframeBaseOffsetRef = useRef<number>(target?.resumeTime || 0);
   const iframeWatchStartRef = useRef<number>(Date.now());
+  const hasConfirmedPlaybackRef = useRef<boolean>(false);
 
   const progressRef = useRef({
     currentTime: target?.resumeTime || 0,
@@ -72,7 +74,7 @@ export function usePlaybackProgress({
       const { currentTime: cur, duration: dur, hasVerifiedDuration: verified, isEnded: ended } =
         progressRef.current;
 
-      if (cur >= 5) {
+      if (cur >= 5 && hasConfirmedPlaybackRef.current) {
         const prevContentId = buildContentId(prev);
         const isSeries = Boolean(prev.isSeries);
         const validDuration =
@@ -106,7 +108,15 @@ export function usePlaybackProgress({
         }
       }
 
-      const initResume = target.resumeTime || 0;
+      // Read existing saved progress for new target
+      const contentId = buildContentId(target);
+      const existingSaved = getContinueWatchingRecord(scopedKey, contentId);
+      const legitimateSavedTime =
+        existingSaved && Number.isFinite(existingSaved.currentTime) && existingSaved.currentTime >= 5
+          ? existingSaved.currentTime
+          : 0;
+
+      const initResume = target.resumeTime || legitimateSavedTime || 0;
       setCurrentTime(initResume);
       setDuration(null);
       setHasVerifiedDuration(false);
@@ -114,6 +124,7 @@ export function usePlaybackProgress({
       lastSaveTimeRef.current = 0;
       iframeBaseOffsetRef.current = initResume;
       iframeWatchStartRef.current = Date.now();
+      hasConfirmedPlaybackRef.current = false;
       progressRef.current = {
         currentTime: initResume,
         duration: null,
@@ -121,9 +132,21 @@ export function usePlaybackProgress({
         isEnded: false,
       };
     } else if (!prev && target) {
-      const initResume = target.resumeTime || 0;
+      const contentId = buildContentId(target);
+      const existingSaved = getContinueWatchingRecord(scopedKey, contentId);
+      const legitimateSavedTime =
+        existingSaved && Number.isFinite(existingSaved.currentTime) && existingSaved.currentTime >= 5
+          ? existingSaved.currentTime
+          : 0;
+
+      const initResume = target.resumeTime || legitimateSavedTime || 0;
+      if (initResume > 0) {
+        setCurrentTime(initResume);
+        progressRef.current.currentTime = initResume;
+      }
       iframeBaseOffsetRef.current = initResume;
       iframeWatchStartRef.current = Date.now();
+      hasConfirmedPlaybackRef.current = false;
     }
     prevTargetRef.current = target;
   }, [target, scopedKey]);
@@ -143,7 +166,22 @@ export function usePlaybackProgress({
 
       if (cur < 5 && !ended) return;
 
+      // Requirement 1 & 2 & 3: Protect existing legitimate resume position
       const contentId = buildContentId(target);
+      const existingRecord = getContinueWatchingRecord(scopedKey, contentId);
+      const existingSavedTime =
+        existingRecord && Number.isFinite(existingRecord.currentTime) ? existingRecord.currentTime : 0;
+
+      // If an existing legitimate position exists (>= 5s), an unconfirmed or speculative lower timestamp must NEVER overwrite it!
+      if (!force && existingSavedTime >= 5 && cur < existingSavedTime - 2) {
+        return;
+      }
+
+      // If playback has never been confirmed on an iframe, do not write speculative wall-clock time
+      if (isIframe && !hasConfirmedPlaybackRef.current && !ended && !verified) {
+        return;
+      }
+
       const isSeries = Boolean(target.isSeries);
       const validDuration =
         Number.isFinite(dur) && (dur ?? 0) > 0 ? Math.floor(dur!) : null;
@@ -203,7 +241,7 @@ export function usePlaybackProgress({
         updatedAt: Date.now(),
       });
     },
-    [target, scopedKey]
+    [target, scopedKey, isIframe]
   );
 
   const flushProgress = useCallback(() => {
@@ -222,6 +260,7 @@ export function usePlaybackProgress({
       const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
 
       if (cur > 0 && !video.paused) {
+        hasConfirmedPlaybackRef.current = true;
         onPlaybackStartedRef.current?.();
       }
 
@@ -233,6 +272,11 @@ export function usePlaybackProgress({
 
       setCurrentTime(cur);
       saveProgress(false, cur, dur);
+    };
+
+    const handlePlay = () => {
+      hasConfirmedPlaybackRef.current = true;
+      onPlaybackStartedRef.current?.();
     };
 
     const handleDurationChange = () => {
@@ -259,6 +303,8 @@ export function usePlaybackProgress({
     };
 
     video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('playing', handlePlay);
     video.addEventListener('durationchange', handleDurationChange);
     video.addEventListener('loadedmetadata', handleDurationChange);
     video.addEventListener('pause', handlePause);
@@ -266,6 +312,8 @@ export function usePlaybackProgress({
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('playing', handlePlay);
       video.removeEventListener('durationchange', handleDurationChange);
       video.removeEventListener('loadedmetadata', handleDurationChange);
       video.removeEventListener('pause', handlePause);
@@ -276,14 +324,29 @@ export function usePlaybackProgress({
   // Vanilla startIframeWatchTracker (L2844-2880): 1s wall-clock tracker for embeds without postMessage
   useEffect(() => {
     if (!isIframe || !target || isResolving) return;
-    iframeWatchStartRef.current = Date.now();
-    iframeBaseOffsetRef.current = progressRef.current.currentTime || target.resumeTime || 0;
+
+    // Detect user interaction with the iframe (focus shift to p-iframe)
+    const handleWindowBlur = () => {
+      if (iframeRef.current && document.activeElement === iframeRef.current) {
+        hasConfirmedPlaybackRef.current = true;
+        onPlaybackStartedRef.current?.();
+      }
+    };
+    window.addEventListener('blur', handleWindowBlur);
 
     const interval = setInterval(() => {
       const frame = iframeRef.current;
       if (!frame || frame.style.display === 'none') return;
       if (document.visibilityState !== 'visible') return;
+
+      // If genuine postMessage telemetry is active with verified duration, let handleMessage handle progress
       if (progressRef.current.hasVerifiedDuration && progressRef.current.currentTime > 0) {
+        return;
+      }
+
+      // Requirement 2: An idle iframe must not be treated as confirmed playback.
+      // Do not advance or save speculative wall-clock progress while the player is idle.
+      if (!hasConfirmedPlaybackRef.current) {
         return;
       }
 
@@ -297,7 +360,10 @@ export function usePlaybackProgress({
       }
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
   }, [isIframe, target, isResolving, iframeRef, saveProgress]);
 
   // Permitted iframe postMessage telemetry listener (Vanilla L6065-6171)
@@ -354,6 +420,7 @@ export function usePlaybackProgress({
         }
 
         if (hasValidDur) {
+          hasConfirmedPlaybackRef.current = true;
           setDuration(tot);
           setHasVerifiedDuration(true);
           progressRef.current.duration = tot;
@@ -363,8 +430,9 @@ export function usePlaybackProgress({
             setCurrentTime(cur);
             progressRef.current.currentTime = cur;
           }
-        } else if (hasValidCur && progressRef.current.hasVerifiedDuration) {
-          if (cur <= (progressRef.current.duration || 0) + 5) {
+        } else if (hasValidCur) {
+          hasConfirmedPlaybackRef.current = true;
+          if (progressRef.current.hasVerifiedDuration && cur <= (progressRef.current.duration || 0) + 5) {
             setCurrentTime(cur);
             progressRef.current.currentTime = cur;
           }

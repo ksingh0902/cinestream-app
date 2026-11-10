@@ -418,7 +418,11 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
       const lblLow = (srv.label || '').toLowerCase();
 
       // Vanilla L3379-3396: On FilmU server - do NOT show Resume or Start Over. Keep it for VIP-no-ads and native HLS.
-      const isFilmU = uLow.includes('filmu') || lblLow.includes('filmu');
+      const isFilmU =
+        uLow.includes('filmu') ||
+        lblLow.includes('filmu') ||
+        uLow.includes('vidly.pro') ||
+        lblLow.includes('vidly');
       if (isFilmU) {
         setResumeBannerRecord(null);
         return;
@@ -1415,7 +1419,10 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   // Double click left or right half of playerContainer to skip 10s (Vanilla L4226-4237)
   const handleContainerDoubleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (isIframe) return;
+      if (isIframe) {
+        showHud('Seeking handled via player controls in embed');
+        return;
+      }
       const tgt = e.target as HTMLElement;
       if (tgt && tgt.tagName === 'BUTTON') return;
       const container = playerContainerRef.current;
@@ -1429,7 +1436,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
         handleSkip(1);
       }
     },
-    [handleSkip, isIframe]
+    [handleSkip, isIframe, showHud]
   );
 
   // Close player handler (Vanilla L5308-5396)
