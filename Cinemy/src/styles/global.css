@@ -25,7 +25,6 @@ body {
   font-family: var(--font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
 }
 
 /* Accessibility: Universal Focus Outline for Keyboard and TV remote navigation */
