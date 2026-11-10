@@ -37,6 +37,14 @@
   box-shadow: 0 0 12px var(--accent-glow);
 }
 
+.header-nav-btn.active .nav-btn-icon,
+.header-nav-btn.active:hover .nav-btn-icon {
+  color: #ffffff;
+  stroke: #ffffff;
+  stroke-width: 2px;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.8));
+}
+
 .btn-header-profile {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
