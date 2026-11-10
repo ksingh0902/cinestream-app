@@ -54,8 +54,8 @@ class PrivateAccessMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
 
-        # 1. Allow browser metadata (favicon)
-        if path in ("/favicon.ico", "/favicon.svg"):
+        # 1. Allow browser metadata (favicon, PWA manifest, and app icons)
+        if path in ("/favicon.ico", "/favicon.svg", "/manifest.webmanifest") or path.startswith("/icons/"):
             return await call_next(request)
 
         # 2. Check global authentication storage state
