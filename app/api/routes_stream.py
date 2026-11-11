@@ -20,6 +20,10 @@ from .routes_catalog import get_db_connection
 router = APIRouter()
 
 
+_EPISODE_STREAM_CACHE: dict[str, tuple[float, dict]] = {}
+_MOVIE_STREAM_CACHE: dict[str, tuple[float, dict]] = {}
+
+
 def _persist_catalog_update(sql: str, params: tuple) -> None:
     """Best-effort development cache only; production catalogue is immutable."""
     if os.getenv("CATALOG_READ_ONLY", "0") == "1":
@@ -172,7 +176,19 @@ def _prioritize_stream_servers(servers: list[dict], source: str = "") -> tuple[s
     ordered = sorted(servers, key=rank)
     relabeled = []
     seen_urls = set()
-    disallowed_hosts = ("vidlink.pro", "videasy.to", "vidcore.org", "vidsrc.pm", "2embed.cc", "primesrc.me")
+    disallowed_hosts = (
+        "vidlink.pro",
+        "videasy.to",
+        "vidcore.org",
+        "vidsrc.pm",
+        "2embed.cc",
+        "primesrc.me",
+        "openload.co",
+        "oload.download",
+        "watchkar.com",
+        "autoembed.cc",
+        "cluster.dooflix.live",
+    )
 
     for srv in ordered:
         u = srv.get("url") or ""
@@ -269,14 +285,22 @@ def stream(
         target_episode = None
 
     if has_ep_params:
+        s_num = target_season or 1
+        e_num = target_episode or 1
+        ep_cache_key = f"{movie_id}:s{s_num}:e{e_num}"
+
+        if not force_refresh and ep_cache_key in _EPISODE_STREAM_CACHE:
+            exp, cached_res = _EPISODE_STREAM_CACHE[ep_cache_key]
+            if time.time() < exp:
+                return {**cached_res, "cached": True}
+
         tmdb_id = row["tmdb_id"]
         if not tmdb_id:
             tmdb_id = _lookup_tmdb_id(row["title"], row["year"], is_series=True)
             if tmdb_id:
                 _persist_catalog_update("UPDATE movies SET tmdb_id=? WHERE id=?", (tmdb_id, movie_id))
+
         if source == "movies7":
-            s_num = target_season or 1
-            e_num = target_episode or 1
             try:
                 info = movies7_resolver.resolve(
                     row["detail_url"] or row["url"] or "",
@@ -285,12 +309,7 @@ def stream(
                     season=s_num,
                     episode=e_num,
                 )
-                now = int(time.time())
-                _persist_catalog_update(
-                    "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
-                    (info.url, info.kind, json.dumps(info.servers), now, movie_id),
-                )
-                return {
+                res = {
                     "kind": info.kind,
                     "url": info.url,
                     "servers": info.servers,
@@ -302,39 +321,48 @@ def stream(
                     "season": s_num,
                     "episode": e_num,
                 }
+                _EPISODE_STREAM_CACHE[ep_cache_key] = (time.time() + 3600, res)
+                return res
             except Exception:
                 pass
-        if tmdb_id and source != "movies7":
-            s_num = target_season or 1
-            e_num = target_episode or 1
+
+        if tmdb_id:
             dummy_url = f"https://embed.filmu.in/tv/{tmdb_id}/{s_num}/{e_num}"
-            existing_servers = []
-            if row["servers_json"]:
-                try:
-                    existing_servers = json.loads(row["servers_json"])
-                except Exception:
-                    pass
             main_url, servers = enrich_stream_servers(
                 dummy_url,
                 is_series=True,
-                existing_servers=existing_servers,
                 tmdb_id=str(tmdb_id),
                 season=s_num,
                 episode=e_num,
+                source=source,
             )
-            main_url, servers = _prioritize_stream_servers(servers, source=source)
-            return {
-                "kind": "iframe",
+            res = {
+                "kind": "iframe" if servers else "hls",
                 "url": main_url,
                 "servers": servers,
                 "headers": {},
                 "cached": False,
-                "type": "iframe",
+                "type": "iframe" if servers else "hls",
                 "play": main_url,
                 "movie_id": movie_id,
                 "season": s_num,
                 "episode": e_num,
             }
+            _EPISODE_STREAM_CACHE[ep_cache_key] = (time.time() + 3600, res)
+            return res
+
+    m_cache_key = str(movie_id)
+    if not force_refresh and m_cache_key in _MOVIE_STREAM_CACHE:
+        exp, cached_res = _MOVIE_STREAM_CACHE[m_cache_key]
+        if time.time() < exp:
+            return {**cached_res, "cached": True}
+
+    row_embeds = []
+    if row["embeds"]:
+        try:
+            row_embeds = json.loads(row["embeds"])
+        except Exception:
+            pass
 
     is_fresh = bool(
         row["player_url"]
@@ -380,10 +408,17 @@ def stream(
         p_kind = row["player_kind"] or adapter.player_kind
         p_url = row["player_url"]
         if p_kind == "iframe" and source != "movies7":
-            p_url, servers = enrich_stream_servers(p_url, is_series=is_series_record, existing_servers=servers, tmdb_id=str(row["tmdb_id"] or ""))
+            p_url, servers = enrich_stream_servers(
+                p_url,
+                is_series=is_series_record,
+                existing_servers=servers,
+                tmdb_id=str(row["tmdb_id"] or ""),
+                embeds=row_embeds,
+                source=source,
+            )
         p_url, servers = _prioritize_stream_servers(servers or ([{"label": "Server 1", "url": p_url, "kind": p_kind}] if p_url else []), source=source)
 
-        return {
+        res = {
             "kind": p_kind,
             "url": p_url,
             "servers": servers,
@@ -394,6 +429,8 @@ def stream(
             "play": p_url,
             "movie_id": movie_id,
         }
+        _MOVIE_STREAM_CACHE[m_cache_key] = (time.time() + (1800 if p_kind == "hls" else 3600), res)
+        return res
 
     detail_url = row["detail_url"] or row["url"]
     tmdb_id = row["tmdb_id"]
@@ -459,14 +496,14 @@ def stream(
 
         if tmdb_id:
             dummy_url = _dooflix_embed_url(str(tmdb_id), row["title"], doo_is_series)
-            main_url, servers = enrich_stream_servers(dummy_url, is_series=doo_is_series, tmdb_id=str(tmdb_id))
+            main_url, servers = enrich_stream_servers(dummy_url, is_series=doo_is_series, tmdb_id=str(tmdb_id), embeds=row_embeds, source="dooflix")
             main_url, servers = _prioritize_stream_servers(servers, source="dooflix")
             now = int(time.time())
             _persist_catalog_update(
                 "UPDATE movies SET player_url=?, player_kind='iframe', servers_json=?, resolved_at=? WHERE id=?",
                 (main_url, json.dumps(servers), now, movie_id),
             )
-            return {
+            res = {
                 "kind": "iframe",
                 "url": main_url,
                 "servers": servers,
@@ -476,6 +513,8 @@ def stream(
                 "play": main_url,
                 "movie_id": movie_id,
             }
+            _MOVIE_STREAM_CACHE[m_cache_key] = (time.time() + 3600, res)
+            return res
 
     if not tmdb_id and detail_url:
         m_tid = re.search(r"-(\d+)/?$", detail_url)
@@ -498,7 +537,7 @@ def stream(
         if tmdb_id and source != "movies7" and (source == "ask4movie" or row["player_kind"] == "iframe"):
             is_series = doo_is_series if source == "dooflix" else bool(row["is_series"])
             dummy_url = f"https://embed.filmu.in/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "")
-            main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
+            main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id), embeds=row_embeds, source=source)
             main_url, servers = _prioritize_stream_servers(servers, source=source)
             from ..adapters.base import StreamInfo
             info = StreamInfo(kind="iframe", url=main_url, servers=servers)
@@ -512,6 +551,8 @@ def stream(
                         is_series=is_series,
                         existing_servers=up_info.servers,
                         tmdb_id=str(tmdb_id) if tmdb_id else None,
+                        embeds=row_embeds,
+                        source=source,
                     )
                     from ..adapters.base import StreamInfo
                     info = StreamInfo(kind="iframe", url=main_url, servers=servers)
@@ -537,14 +578,14 @@ def stream(
                 if source == "dooflix"
                 else f"https://embed.filmu.in/{'tv' if is_series else 'movie'}/{tmdb_id}" + ("/1/1" if is_series else "")
             )
-            main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id))
+            main_url, servers = enrich_stream_servers(dummy_url, is_series=is_series, tmdb_id=str(tmdb_id), embeds=row_embeds, source=source)
             main_url, servers = _prioritize_stream_servers(servers, source=source)
             now = int(time.time())
             _persist_catalog_update(
                 "UPDATE movies SET player_url=?, player_kind=?, servers_json=?, resolved_at=? WHERE id=?",
                 (main_url, "iframe", json.dumps(servers), now, movie_id),
             )
-            return {
+            res = {
                 "kind": "iframe",
                 "url": main_url,
                 "servers": servers,
@@ -554,6 +595,8 @@ def stream(
                 "play": main_url,
                 "movie_id": movie_id,
             }
+            _MOVIE_STREAM_CACHE[m_cache_key] = (time.time() + 3600, res)
+            return res
         if row["player_url"]:
             servers = []
             if row["servers_json"]:
@@ -569,9 +612,11 @@ def stream(
                     is_series=doo_is_series if source == "dooflix" else is_series_record,
                     existing_servers=servers,
                     tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
+                    embeds=row_embeds,
+                    source=source,
                 )
             p_url, servers = _prioritize_stream_servers(servers or ([{"label": "Server 1", "url": p_url, "kind": p_kind}] if p_url else []), source=source)
-            return {
+            res = {
                 "kind": p_kind,
                 "url": p_url,
                 "servers": servers,
@@ -582,6 +627,8 @@ def stream(
                 "play": p_url,
                 "movie_id": movie_id,
             }
+            _MOVIE_STREAM_CACHE[m_cache_key] = (time.time() + (1800 if p_kind == "hls" else 3600), res)
+            return res
         raise HTTPException(502, str(exc)[:200])
 
     if info.kind == "iframe" and source != "movies7":
@@ -590,6 +637,8 @@ def stream(
             is_series=doo_is_series if source == "dooflix" else is_series_record,
             existing_servers=info.servers,
             tmdb_id=str(tmdb_id or row["tmdb_id"] or "") or None,
+            embeds=row_embeds,
+            source=source,
         )
     info.url, info.servers = _prioritize_stream_servers(info.servers or ([{"label": "Server 1", "url": info.url, "kind": info.kind}] if info.url else []), source=source)
 
@@ -599,7 +648,7 @@ def stream(
         (info.url, info.kind, json.dumps(info.servers), now, movie_id),
     )
 
-    return {
+    res = {
         "kind": info.kind,
         "url": info.url,
         "servers": info.servers,
@@ -609,4 +658,6 @@ def stream(
         "play": info.url,
         "movie_id": movie_id,
     }
+    _MOVIE_STREAM_CACHE[m_cache_key] = (time.time() + (1800 if info.kind == "hls" else 3600), res)
+    return res
 

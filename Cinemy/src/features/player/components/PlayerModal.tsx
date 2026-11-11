@@ -915,6 +915,9 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
         if (info.servers && info.servers.length > 0) {
           startWatchdogRef.current(0);
+        } else {
+          setResolveError('No playable stream available for this title across verified sources.');
+          setShowRetryBtn(true);
         }
       } catch (err: any) {
         if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current);
@@ -2299,7 +2302,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
           className="prod-server-switcher"
           style={{
             display:
-              streamInfo && streamInfo.servers && streamInfo.servers.length > 1 ? 'flex' : 'none',
+              streamInfo && streamInfo.servers && streamInfo.servers.length > 1 && !isResolving ? 'flex' : 'none',
             gap: '8px',
             padding: '8px 0 12px',
             flexWrap: 'wrap',

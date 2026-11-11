@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from ..base import StreamInfo
+from ..embed_helper import enrich_stream_servers
 from .config import CFG
 
 
@@ -16,9 +17,7 @@ def resolve(
     episode: Optional[int | str] = None,
 ) -> StreamInfo:
     """Resolve playback servers for Movies7 items.
-    Generates multi-source embeds (Videasy, Vsembed, 111Movies, PrimeSrc)
-    matching movies7to.net's player stack.
-    """
+    Dynamically discovers and verifies available playback sources."""
     tid = str(tmdb_id) if tmdb_id else None
     series_detected = is_series
 
@@ -30,7 +29,6 @@ def resolve(
             series_detected = True
 
     if not tid:
-        # Fallback if URL is generic
         m_any = re.search(r"(\d{3,9})", detail_url or "")
         if m_any:
             tid = m_any.group(1)
@@ -38,22 +36,14 @@ def resolve(
     s = str(season or 1)
     e = str(episode or 1)
 
-    if series_detected:
-        primary_url = f"https://embed.filmu.in/tv/{tid}/{s}/{e}"
-        servers = [
-            {"label": "Server 1 (FilmU - Fast HD) (Recommended)", "url": f"https://embed.filmu.in/tv/{tid}/{s}/{e}", "kind": "iframe"},
-            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/tv/{tid}/{s}/{e}?autoplay=1&ds_lang=en", "kind": "iframe"},
-            {"label": "Server 3 (Cinesrc - HD)", "url": f"https://cinesrc.st/embed/tv/{tid}/{s}/{e}", "kind": "iframe"},
-            {"label": "Server 4 (111Movies - Multi)", "url": f"https://111movies.net/tv/{tid}/{s}/{e}", "kind": "iframe"},
-        ]
-    else:
-        primary_url = f"https://embed.filmu.in/movie/{tid}"
-        servers = [
-            {"label": "Server 1 (FilmU - Fast HD) (Recommended)", "url": f"https://embed.filmu.in/movie/{tid}", "kind": "iframe"},
-            {"label": "Server 2 (VIP - No ADS)", "url": f"https://embed.vidsrc.si/embed/movie/{tid}?autoplay=1&ds_lang=en", "kind": "iframe"},
-            {"label": "Server 3 (Cinesrc - HD)", "url": f"https://cinesrc.st/embed/movie/{tid}", "kind": "iframe"},
-            {"label": "Server 4 (111Movies - Multi)", "url": f"https://111movies.net/movie/{tid}", "kind": "iframe"},
-        ]
+    primary_url, servers = enrich_stream_servers(
+        primary_url=detail_url,
+        is_series=series_detected,
+        tmdb_id=tid,
+        season=s,
+        episode=e,
+        source="movies7",
+    )
 
     return StreamInfo(
         kind="iframe",
