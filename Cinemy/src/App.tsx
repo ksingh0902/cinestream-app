@@ -74,7 +74,7 @@ export const AppContent: React.FC = () => {
   };
 
   const handleHomeClick = () => {
-    setActiveCategory({ category: 'all' });
+    setActiveCategory({ category: 'all', resetToken: Date.now() });
     navigate('/');
   };
 
@@ -104,7 +104,11 @@ export const AppContent: React.FC = () => {
       activeCategory={activeCategory}
       onSelectCategory={(selection) => {
         setActiveCategory(selection);
-        if (path !== '/' && path !== '/movies' && path !== '/series') {
+        if (selection.category === 'all' && !selection.genre) {
+          if (path !== '/') {
+            navigate('/');
+          }
+        } else if (path !== '/' && path !== '/movies' && path !== '/series') {
           navigate('/');
         }
       }}

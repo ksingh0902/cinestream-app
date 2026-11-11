@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Settings, RefreshCw, Check, AlertTriangle, Activity, BarChart3, Sparkles, KeyRound, ArrowLeft } from 'lucide-react';
+import { ShieldAlert, Settings, RefreshCw, Check, AlertTriangle, Activity, BarChart3, Sparkles, KeyRound, ArrowLeft, Sliders } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../router';
+import { getHomepagePreferences, updateHomepagePreferences } from '../../api/catalogue';
+import { HomepagePreferences } from '../../types/catalogue';
 import {
   fetchStats,
   fetchSyncStatus,
@@ -24,6 +26,17 @@ export const AdminConsolePage: React.FC = () => {
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Homepage discovery preferences
+  const [prefs, setPrefs] = useState<HomepagePreferences>({
+    recently_added_enabled: true,
+    recently_upgraded_enabled: true,
+    recently_added_window_months: 3,
+    recently_upgraded_window_months: 3,
+    default_sort: 'recent',
+    allowed_qualities: ['4K', '1080p', '720p', 'HD', 'WEB-DL', 'BluRay'],
+  });
+  const [isSavingPrefs, setIsSavingPrefs] = useState<boolean>(false);
 
   // Form states
   const [currentAdminPw, setCurrentAdminPw] = useState<string>('');
@@ -53,16 +66,37 @@ export const AdminConsolePage: React.FC = () => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsRes, syncRes, healthRes] = await Promise.all([
+      const [statsRes, syncRes, healthRes, prefsRes] = await Promise.all([
         fetchStats().catch(() => null),
         fetchSyncStatus().catch(() => null),
         fetchHealth().catch(() => null),
+        getHomepagePreferences().catch(() => null),
       ]);
       setStats(statsRes);
       setSyncStatus(syncRes);
       setHealth(healthRes);
+      if (prefsRes) setPrefs(prefsRes);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSavePreferences = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingPrefs(true);
+    setActionNotice(null);
+    try {
+      const res = await updateHomepagePreferences(prefs);
+      if (res && res.ok) {
+        setPrefs(res.preferences);
+        setActionNotice({ type: 'success', text: 'Homepage discovery preferences updated successfully.' });
+      } else {
+        setActionNotice({ type: 'error', text: 'Failed to update preferences.' });
+      }
+    } catch (err: any) {
+      setActionNotice({ type: 'error', text: err.message || 'Error updating homepage preferences.' });
+    } finally {
+      setIsSavingPrefs(false);
     }
   };
 
@@ -260,6 +294,101 @@ export const AdminConsolePage: React.FC = () => {
                   disabled={isRevokingViewers}
                 >
                   {isRevokingViewers ? 'Revoking...' : 'Revoke All Viewer Sessions'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Card 5: Homepage Discovery Preferences */}
+          <div className="admin-card span-full">
+            <h3 className="card-header" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Sliders size={16} strokeWidth={1.5} /> Homepage Discovery Sections Configuration
+            </h3>
+            <p className="card-desc">
+              Configure visibility, time windows, and default catalogue behavior for the homepage discovery sections.
+            </p>
+
+            <form onSubmit={handleSavePreferences} className="admin-prefs-grid">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+                {/* Toggle Recently Added */}
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}>
+                    <input
+                      type="checkbox"
+                      checked={prefs.recently_added_enabled}
+                      onChange={(e) => setPrefs((prev) => ({ ...prev, recently_added_enabled: e.target.checked }))}
+                    />
+                    <span>Enable "Recently Added" Section</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--dim)' }}>Recency Window:</span>
+                    <select
+                      className="form-input"
+                      style={{ padding: '4px 8px', fontSize: '13px', width: 'auto' }}
+                      value={prefs.recently_added_window_months}
+                      onChange={(e) => setPrefs((prev) => ({ ...prev, recently_added_window_months: Number(e.target.value) }))}
+                    >
+                      <option value={1}>1 Month</option>
+                      <option value={2}>2 Months</option>
+                      <option value={3}>3 Months (Default)</option>
+                      <option value={6}>6 Months</option>
+                      <option value={12}>12 Months</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Toggle Recently Upgraded */}
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}>
+                    <input
+                      type="checkbox"
+                      checked={prefs.recently_upgraded_enabled}
+                      onChange={(e) => setPrefs((prev) => ({ ...prev, recently_upgraded_enabled: e.target.checked }))}
+                    />
+                    <span>Enable "Recently Upgraded" Section</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--dim)' }}>Recency Window:</span>
+                    <select
+                      className="form-input"
+                      style={{ padding: '4px 8px', fontSize: '13px', width: 'auto' }}
+                      value={prefs.recently_upgraded_window_months}
+                      onChange={(e) => setPrefs((prev) => ({ ...prev, recently_upgraded_window_months: Number(e.target.value) }))}
+                    >
+                      <option value={1}>1 Month</option>
+                      <option value={2}>2 Months</option>
+                      <option value={3}>3 Months (Default)</option>
+                      <option value={6}>6 Months</option>
+                      <option value={12}>12 Months</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Default Sorting */}
+                <div className="form-group">
+                  <label className="form-label">Default Catalogue Sorting</label>
+                  <select
+                    className="form-input"
+                    value={prefs.default_sort}
+                    onChange={(e) => setPrefs((prev) => ({ ...prev, default_sort: e.target.value }))}
+                  >
+                    <option value="recent">Default (Recommended / Recent)</option>
+                    <option value="first_added">Newest Added (First Discovered)</option>
+                    <option value="recently_upgraded">Recently Upgraded Quality</option>
+                    <option value="year">Release Year (Newest First)</option>
+                    <option value="quality">Highest Available Quality</option>
+                    <option value="title">Alphabetical (A–Z)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-actions-inline">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSavingPrefs}
+                >
+                  {isSavingPrefs ? 'Saving Preferences...' : 'Save Homepage Discovery Preferences'}
                 </button>
               </div>
             </form>

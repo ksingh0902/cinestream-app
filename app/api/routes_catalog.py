@@ -209,6 +209,10 @@ def _format_row(row: dict) -> dict:
                 d[k] = json.loads(d[k])
             except Exception:
                 pass
+
+    if d.get("latest_quality_transition"):
+        d["upgradeBadge"] = d["latest_quality_transition"]
+
     return d
 
 
@@ -346,11 +350,14 @@ def movies(
     year: Optional[str] = None,
     series: Optional[int] = None,
     sort: str = "recent",
+    quality: Optional[str] = None,
+    language: Optional[str] = None,
+    window_months: Optional[int] = None,
     page: int = 1,
     per_page: int = 48,
 ):
     page = max(1, int(page))
-    per_page = min(48, max(1, int(per_page)))
+    per_page = min(100, max(1, int(per_page)))
     filter_key = (
         source or "",
         (q or "").strip().lower(),
@@ -360,6 +367,9 @@ def movies(
         sort,
         page,
         per_page,
+        (quality or "").strip().lower(),
+        (language or "").strip().lower(),
+        window_months or 0,
     )
     now = time.monotonic()
 
@@ -399,8 +409,31 @@ def movies(
             args.extend([f'%"{genre}"%', genre, f"%{genre}%"])
 
     if year:
-        where.append("year = ?")
-        args.append(year)
+        if year.lower() == "older":
+            where.append("year GLOB '[12][09][0-9][0-9]' AND CAST(year AS INT) < 2020")
+        else:
+            where.append("year = ?")
+            args.append(year)
+
+    if quality:
+        where.append("quality LIKE ?")
+        args.append(f"%{quality}%")
+
+    if language:
+        where.append("(language LIKE ? OR language_code LIKE ? OR title LIKE ? OR genres LIKE ?)")
+        args.extend([f"%{language}%", f"%{language[:2]}%", f"%{language}%", f"%{language}%"])
+
+    if window_months and int(window_months) > 0:
+        cutoff_ts = int(time.time()) - (int(window_months) * 30 * 86400)
+        if sort == "recently_upgraded":
+            where.append("last_quality_upgrade_at >= ?")
+            args.append(cutoff_ts)
+        elif sort in ("first_added", "newest_added"):
+            where.append("COALESCE(first_added_at, updated_at, 0) >= ?")
+            args.append(cutoff_ts)
+
+    if sort == "recently_upgraded":
+        where.append("last_quality_upgrade_at IS NOT NULL")
 
     where_clause = " AND ".join(where)
 
@@ -409,6 +442,53 @@ def movies(
         order = "CASE WHEN title LIKE ? THEN 0 WHEN title LIKE ? THEN 1 ELSE 2 END, CAST(year AS INT) DESC, id ASC"
         query_sql = f"SELECT * FROM movies WHERE {where_clause} ORDER BY {order}"
         query_args = args + [f"{q_str}%", f"%{q_str}%"]
+    elif sort in ("first_added", "newest_added"):
+        query_sql = f"""
+            WITH filtered AS (
+                SELECT * FROM movies WHERE {where_clause}
+            ),
+            ranked AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY source 
+                    ORDER BY 
+                        CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC, 
+                        COALESCE(first_added_at, updated_at, 0) DESC,
+                        id ASC
+                ) AS src_rank
+                FROM filtered
+            )
+            SELECT * FROM ranked 
+            ORDER BY src_rank ASC, 
+                CASE source 
+                    WHEN 'yomovies' THEN 1 
+                    WHEN 'dooflix' THEN 2 
+                    WHEN 'ask4movie' THEN 3 
+                    ELSE 4 
+                END ASC
+        """
+        query_args = args
+    elif sort == "recently_upgraded":
+        query_sql = f"SELECT * FROM movies WHERE {where_clause} ORDER BY last_quality_upgrade_at DESC, id DESC"
+        query_args = args
+    elif sort == "year":
+        query_sql = f"SELECT * FROM movies WHERE {where_clause} ORDER BY CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC, id ASC"
+        query_args = args
+    elif sort == "quality":
+        query_sql = f"""
+            SELECT * FROM movies WHERE {where_clause}
+            ORDER BY 
+                CASE 
+                    WHEN quality LIKE '%4K%' OR quality LIKE '%2160%' THEN 50
+                    WHEN quality LIKE '%BluRay%' OR quality LIKE '%BDRip%' THEN 40
+                    WHEN quality LIKE '%1080%' OR quality LIKE '%FHD%' OR quality LIKE '%WEB-DL%' OR quality LIKE '%WEBRip%' THEN 30
+                    WHEN quality LIKE '%720%' OR quality LIKE '%HD%' THEN 20
+                    WHEN quality LIKE '%DVD%' OR quality LIKE '%SD%' THEN 10
+                    ELSE 0
+                END DESC,
+                CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC,
+                id ASC
+        """
+        query_args = args
     elif sort in ("imdb", "rating"):
         query_sql = (
             f"SELECT * FROM movies WHERE {where_clause} "
@@ -487,6 +567,206 @@ def movies(
         _filter_cache[filter_key] = (now, result)
 
     return result
+
+
+DEFAULT_HOMEPAGE_PREFERENCES = {
+    "recently_added_enabled": True,
+    "recently_upgraded_enabled": True,
+    "recently_added_window_months": 3,
+    "recently_upgraded_window_months": 3,
+    "default_sort": "recent",
+    "allowed_qualities": ["4K", "1080p", "720p", "HD", "WEB-DL", "BluRay"],
+}
+
+
+@router.get("/api/catalog/recently-added")
+def recently_added(limit: int = 24, window_months: int = 3, series: Optional[int] = None):
+    """
+    Discovery row: Titles first discovered within the configured time window (default 3 months).
+    Sorted newest first using original first_added_at, de-duplicated by title.
+    """
+    limit = min(60, max(1, int(limit)))
+    window = max(1, min(24, int(window_months)))
+    cutoff_ts = int(time.time()) - (window * 30 * 86400)
+
+    where = [
+        "title IS NOT NULL AND title != ''",
+        f"({ADULT_EXCLUSION_SQL})",
+        "(COALESCE(poster, poster_url, '') != '' AND poster NOT LIKE '%logo.png%')",
+        "COALESCE(first_added_at, updated_at, 0) >= ?",
+    ]
+    args: list = [cutoff_ts]
+
+    if series is not None:
+        where.append("is_series = ?")
+        args.append(series)
+
+    where_clause = " AND ".join(where)
+    query_sql = f"""
+        WITH filtered AS (
+            SELECT * FROM movies WHERE {where_clause}
+        ),
+        ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY source 
+                ORDER BY 
+                    CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC,
+                    COALESCE(first_added_at, updated_at, 0) DESC,
+                    id ASC
+            ) AS src_rank
+            FROM filtered
+        )
+        SELECT * FROM ranked 
+        ORDER BY src_rank ASC, 
+            CASE source 
+                WHEN 'yomovies' THEN 1 
+                WHEN 'dooflix' THEN 2 
+                WHEN 'ask4movie' THEN 3 
+                ELSE 4 
+            END ASC
+        LIMIT ?
+    """
+    with get_db_connection() as conn:
+        raw_rows = conn.execute(query_sql, args + [limit * 3]).fetchall()
+        formatted = []
+        seen_titles = set()
+        for r in raw_rows:
+            d = dict(r)
+            if d.get("source") == "movies7" and is_movie_available_on_primary_sources(d.get("title"), d.get("year")):
+                continue
+            nt = _normalized_title(d.get("title"))
+            if nt in seen_titles:
+                continue
+            seen_titles.add(nt)
+            formatted.append(_format_row(d))
+            if len(formatted) >= limit:
+                break
+
+    return {
+        "total": len(formatted),
+        "items": formatted,
+        "window_months": window,
+    }
+
+
+@router.get("/api/catalog/recently-upgraded")
+def recently_upgraded(limit: int = 24, window_months: int = 3, series: Optional[int] = None):
+    """
+    Discovery row: Titles with a verified quality improvement within the configured time window.
+    Sorted by most recent verified upgrade first, containing upgrade badge (e.g. CAM → HD).
+    """
+    limit = min(60, max(1, int(limit)))
+    window = max(1, min(24, int(window_months)))
+    cutoff_ts = int(time.time()) - (window * 30 * 86400)
+
+    where = [
+        "title IS NOT NULL AND title != ''",
+        f"({ADULT_EXCLUSION_SQL})",
+        "(COALESCE(poster, poster_url, '') != '' AND poster NOT LIKE '%logo.png%')",
+        "last_quality_upgrade_at IS NOT NULL",
+        "last_quality_upgrade_at >= ?",
+    ]
+    args: list = [cutoff_ts]
+
+    if series is not None:
+        where.append("is_series = ?")
+        args.append(series)
+
+    where_clause = " AND ".join(where)
+    query_sql = f"""
+        SELECT * FROM movies
+        WHERE {where_clause}
+        ORDER BY last_quality_upgrade_at DESC, id DESC
+        LIMIT ?
+    """
+    with get_db_connection() as conn:
+        raw_rows = conn.execute(query_sql, args + [limit * 2]).fetchall()
+        formatted = []
+        seen_titles = set()
+        for r in raw_rows:
+            d = dict(r)
+            nt = _normalized_title(d.get("title"))
+            if nt in seen_titles:
+                continue
+            seen_titles.add(nt)
+            formatted.append(_format_row(d))
+            if len(formatted) >= limit:
+                break
+
+    return {
+        "total": len(formatted),
+        "items": formatted,
+        "window_months": window,
+    }
+
+
+@router.get("/api/catalog/years")
+def catalog_years():
+    """
+    Release year navigation metadata: Returns actual catalogue release years and title counts.
+    """
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT year, COUNT(*) as cnt
+            FROM movies
+            WHERE year GLOB '[12][09][0-9][0-9]'
+            GROUP BY year
+            ORDER BY CAST(year AS INT) DESC
+        """).fetchall()
+        years_list = [{"year": str(r["year"]), "count": int(r["cnt"])} for r in rows]
+        older_cnt = conn.execute("""
+            SELECT COUNT(*) FROM movies
+            WHERE year GLOB '[12][09][0-9][0-9]' AND CAST(year AS INT) < 2020
+        """).fetchone()[0]
+
+    return {
+        "years": years_list,
+        "older_count": older_cnt,
+    }
+
+
+@router.get("/api/homepage/preferences")
+def get_homepage_preferences():
+    """
+    Retrieve active homepage discovery preferences.
+    """
+    try:
+        from ..auth.store import get_meta_value
+        val = get_meta_value("homepage_preferences")
+        if val:
+            return {**DEFAULT_HOMEPAGE_PREFERENCES, **json.loads(val)}
+    except Exception:
+        pass
+    return DEFAULT_HOMEPAGE_PREFERENCES
+
+
+@router.post("/api/admin/homepage/preferences")
+def update_homepage_preferences(prefs: dict):
+    """
+    Admin-only configuration for homepage discovery sections.
+    """
+    try:
+        from ..auth.store import get_db_connection as get_auth_conn, set_meta_value
+        clean_prefs = {**DEFAULT_HOMEPAGE_PREFERENCES}
+        if "recently_added_enabled" in prefs:
+            clean_prefs["recently_added_enabled"] = bool(prefs["recently_added_enabled"])
+        if "recently_upgraded_enabled" in prefs:
+            clean_prefs["recently_upgraded_enabled"] = bool(prefs["recently_upgraded_enabled"])
+        if "recently_added_window_months" in prefs:
+            clean_prefs["recently_added_window_months"] = max(1, min(12, int(prefs["recently_added_window_months"])))
+        if "recently_upgraded_window_months" in prefs:
+            clean_prefs["recently_upgraded_window_months"] = max(1, min(12, int(prefs["recently_upgraded_window_months"])))
+        if "default_sort" in prefs:
+            clean_prefs["default_sort"] = str(prefs["default_sort"])
+        if "allowed_qualities" in prefs and isinstance(prefs["allowed_qualities"], list):
+            clean_prefs["allowed_qualities"] = [str(q) for q in prefs["allowed_qualities"]]
+
+        with get_auth_conn() as conn:
+            set_meta_value(conn, "homepage_preferences", json.dumps(clean_prefs))
+            conn.commit()
+        return {"ok": True, "preferences": clean_prefs}
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to save preferences: {exc}")
 
 
 @router.get("/api/movie/{movie_id}")

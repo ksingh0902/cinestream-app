@@ -18,6 +18,12 @@ COLUMNS_TO_ADD = [
     ("player_kind", "TEXT DEFAULT 'iframe'"),
     ("servers_json", "TEXT"),
     ("resolved_at", "INTEGER"),
+    ("first_added_at", "INTEGER"),
+    ("last_checked_at", "INTEGER"),
+    ("last_updated_at", "INTEGER"),
+    ("last_quality_upgrade_at", "INTEGER"),
+    ("best_quality", "TEXT"),
+    ("latest_quality_transition", "TEXT"),
 ]
 
 
@@ -71,10 +77,50 @@ def migrate_database(db_path: str) -> None:
             WHERE source = 'yomovies' AND (player_kind IS NULL OR player_kind = '' OR player_kind = 'iframe')
         """)
 
+        # Backfill discovery and recency timestamps for existing catalogue records
+        conn.execute("""
+            UPDATE movies SET
+                first_added_at = COALESCE(updated_at, 1792800000)
+            WHERE first_added_at IS NULL
+        """)
+        conn.execute("""
+            UPDATE movies SET
+                last_checked_at = COALESCE(updated_at, 1792800000)
+            WHERE last_checked_at IS NULL
+        """)
+        conn.execute("""
+            UPDATE movies SET
+                last_updated_at = COALESCE(updated_at, 1792800000)
+            WHERE last_updated_at IS NULL
+        """)
+        conn.execute("""
+            UPDATE movies SET
+                best_quality = quality
+            WHERE best_quality IS NULL AND quality IS NOT NULL
+        """)
+
+        # Quality history table for tracking verified quality improvements
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quality_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movie_id INTEGER NOT NULL,
+                old_quality TEXT,
+                new_quality TEXT NOT NULL,
+                transition_badge TEXT NOT NULL,
+                upgraded_at INTEGER NOT NULL,
+                evidence TEXT,
+                FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
+            )
+        """)
+
         # Indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_movies_source ON movies(source, is_series)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title)")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_movies_source_source_id ON movies(source, source_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_movies_first_added ON movies(first_added_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_movies_last_upgraded ON movies(last_quality_upgrade_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quality_history_upgraded ON quality_history(upgraded_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quality_history_movie ON quality_history(movie_id)")
         
         conn.commit()
     finally:

@@ -6,10 +6,11 @@ interface ContentCardProps {
   movie: MovieItem;
   onSelect: (id: number, title: string) => void;
   tabIndex?: number;
+  upgradeBadge?: string;
 }
 
 export const ContentCard = React.memo<ContentCardProps>(
-  ({ movie, onSelect, tabIndex = 0 }) => {
+  ({ movie, onSelect, tabIndex = 0, upgradeBadge }) => {
     const [imgSrc, setImgSrc] = useState<string>(() =>
       getPosterUrl(movie.poster || movie.poster_url, movie.title, movie.year)
     );
@@ -17,6 +18,7 @@ export const ContentCard = React.memo<ContentCardProps>(
     const rating = formatRating(movie.rating, movie.imdb);
     const isSeries = Boolean(movie.is_series);
     const isDubbed = Boolean(movie.is_hindi_dubbed);
+    const effectiveUpgradeBadge = upgradeBadge || movie.upgradeBadge || movie.latest_quality_transition;
 
     const handleClick = () => {
       onSelect(movie.id, movie.title);
@@ -67,6 +69,13 @@ export const ContentCard = React.memo<ContentCardProps>(
               <span className="badge-tag rating">{rating}</span>
             </div>
           )}
+
+          {/* Quality Upgrade Transition Badge (Bottom-center overlay on poster) */}
+          {effectiveUpgradeBadge && (
+            <div className="card-badge-upgrade">
+              <span className="badge-tag upgrade">{effectiveUpgradeBadge}</span>
+            </div>
+          )}
         </div>
 
         <div className="card-body">
@@ -90,6 +99,9 @@ export const ContentCard = React.memo<ContentCardProps>(
       prevProps.movie.poster_url === nextProps.movie.poster_url &&
       prevProps.movie.rating === nextProps.movie.rating &&
       prevProps.movie.quality === nextProps.movie.quality &&
+      prevProps.movie.latest_quality_transition === nextProps.movie.latest_quality_transition &&
+      prevProps.movie.upgradeBadge === nextProps.movie.upgradeBadge &&
+      prevProps.upgradeBadge === nextProps.upgradeBadge &&
       prevProps.movie.is_series === nextProps.movie.is_series &&
       prevProps.movie.is_hindi_dubbed === nextProps.movie.is_hindi_dubbed &&
       prevProps.onSelect === nextProps.onSelect

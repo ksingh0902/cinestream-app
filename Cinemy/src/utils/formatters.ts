@@ -49,13 +49,16 @@ export function getPosterUrl(poster: string | null | undefined, title: string, y
 /**
  * Formats IMDb / numerical rating cleanly
  */
-export function formatRating(rating: number | null | undefined, imdb: string | null | undefined): string | null {
+export function formatRating(rating: number | string | null | undefined, imdb: string | null | undefined): string | null {
   if (imdb && imdb.trim()) {
     const clean = imdb.replace(/^(IMDb:\s*|★\s*)/i, '').trim();
     if (clean) return clean;
   }
-  if (rating !== null && rating !== undefined && rating > 0) {
-    return rating.toFixed(1);
+  if (rating !== null && rating !== undefined) {
+    const num = typeof rating === 'number' ? rating : parseFloat(rating);
+    if (!isNaN(num) && num > 0) {
+      return num.toFixed(1);
+    }
   }
   return null;
 }

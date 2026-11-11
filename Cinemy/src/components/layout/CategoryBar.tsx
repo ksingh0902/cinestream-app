@@ -17,6 +17,7 @@ export interface CategorySelection {
   category: CategoryKey;
   series?: 0 | 1;
   genre?: string;
+  resetToken?: number;
 }
 
 interface CategoryBarProps {
@@ -150,7 +151,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
     setIsDropdownOpen(false);
     switch (key) {
       case 'all':
-        onSelectCategory({ category: 'all' });
+        onSelectCategory({ category: 'all', resetToken: Date.now() });
         break;
       case 'hindi-dubbed':
         onSelectCategory({ category: 'hindi-dubbed', genre: 'Hollywood Dubbed' });
@@ -178,7 +179,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
     setIsDropdownOpen(false);
     setFocusedIndex(-1);
     if (!genreVal) {
-      onSelectCategory({ category: 'all' });
+      onSelectCategory({ category: 'all', resetToken: Date.now() });
     } else {
       onSelectCategory({
         category: 'all',
