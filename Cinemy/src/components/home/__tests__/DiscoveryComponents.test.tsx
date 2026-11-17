@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { ContentCard } from '../ContentCard';
 import { DiscoveryRow } from '../DiscoveryRow';
 import { BrowseByYear } from '../BrowseByYear';
 import { CatalogFilterBar } from '../CatalogFilterBar';
+import { FeaturedHero } from '../FeaturedHero';
 import { CategoryBar } from '../../layout/CategoryBar';
 import type { MovieItem } from '../../../types/catalogue';
+
+vi.mock('../../../features/watchlist', () => ({
+  useWatchlist: () => ({
+    isInList: () => false,
+    addItem: vi.fn(),
+    removeItem: vi.fn(),
+  }),
+}));
 
 afterEach(() => {
   cleanup();
@@ -173,5 +182,54 @@ describe('Discovery Components & Badging', () => {
         resetToken: expect.any(Number),
       })
     );
+  });
+
+  it('8. FeaturedHero supports touch swipe left/right to navigate slides on mobile', () => {
+    vi.useFakeTimers();
+    if (!window.matchMedia) {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    }
+
+    const secondMovie: MovieItem = { ...mockMovie, id: 102, title: 'Dune: Part Two', year: '2024' };
+    const { container } = render(
+      <FeaturedHero
+        items={[mockMovie, secondMovie]}
+        onPlay={vi.fn()}
+        onMyList={vi.fn()}
+      />
+    );
+
+    const hero = container.querySelector('.hero-fullbleed')!;
+    expect(screen.getByRole('heading', { name: 'Gladiator II' })).toBeDefined();
+
+    // Swipe left -> Next slide
+    fireEvent.touchStart(hero, { touches: [{ clientX: 250, clientY: 200 }] });
+    fireEvent.touchEnd(hero, { changedTouches: [{ clientX: 120, clientY: 205 }] });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole('heading', { name: 'Dune: Part Two' })).toBeDefined();
+
+    // Swipe right -> Previous slide
+    fireEvent.touchStart(hero, { touches: [{ clientX: 120, clientY: 200 }] });
+    fireEvent.touchEnd(hero, { changedTouches: [{ clientX: 260, clientY: 205 }] });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole('heading', { name: 'Gladiator II' })).toBeDefined();
+
+    vi.useRealTimers();
   });
 });

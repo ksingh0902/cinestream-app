@@ -28,6 +28,7 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
   const [isFading, setIsFading] = useState(false);
 
   const timerRef = useRef<number | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const totalItems = items.length;
 
   const goToNext = useCallback(() => {
@@ -73,6 +74,37 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
       setIsFading(false);
     }, 280);
     resetTimer();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLElement>) => {
+    if (totalItems <= 1 || e.touches.length !== 1) return;
+    touchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+    };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLElement>) => {
+    if (!touchStartRef.current || totalItems <= 1 || e.changedTouches.length !== 1) {
+      touchStartRef.current = null;
+      return;
+    }
+    const deltaX = e.changedTouches[0].clientX - touchStartRef.current.x;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+
+    // Trigger slide only on deliberate horizontal swipe (avoid interfering with vertical scroll or taps)
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      if (deltaX < 0) {
+        handleManualNext();
+      } else {
+        handleManualPrev();
+      }
+    }
+  };
+
+  const handleTouchCancel = () => {
+    touchStartRef.current = null;
   };
 
   // Automatic rotation timer — EXACTLY 2000ms per featured item
@@ -138,6 +170,9 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
     <section
       className="hero-fullbleed"
       aria-label="Featured Spotlight"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
     >
       {/* Full-Bleed Backdrop Layer with very slow zoom effect */}
       <div className="hero-backdrop-stage" aria-hidden="true">

@@ -18,6 +18,7 @@
   background: var(--bg);
   display: flex;
   align-items: center;
+  touch-action: pan-y;
 }
 
 @media (max-width: 1024px) {
