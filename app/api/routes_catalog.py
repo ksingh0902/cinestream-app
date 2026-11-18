@@ -580,14 +580,26 @@ DEFAULT_HOMEPAGE_PREFERENCES = {
 
 
 @router.get("/api/catalog/recently-added")
-def recently_added(limit: int = 24, window_months: int = 3, series: Optional[int] = None):
+def recently_added(
+    limit: int = 24,
+    window_months: int = 3,
+    series: Optional[int] = None,
+    latest_crawl: bool = False,
+):
     """
     Discovery row: Titles first discovered within the configured time window (default 3 months).
+    When latest_crawl=True, restricts to the most recent crawler run (24h around latest timestamp).
     Sorted newest first using original first_added_at, de-duplicated by title.
     """
     limit = min(60, max(1, int(limit)))
     window = max(1, min(24, int(window_months)))
     cutoff_ts = int(time.time()) - (window * 30 * 86400)
+
+    if latest_crawl:
+        with get_db_connection() as conn:
+            max_ts = conn.execute("SELECT MAX(COALESCE(first_added_at, updated_at, 0)) FROM movies").fetchone()[0] or 0
+        if max_ts > 0:
+            cutoff_ts = max(cutoff_ts, int(max_ts) - 86400)
 
     where = [
         "title IS NOT NULL AND title != ''",
@@ -612,7 +624,7 @@ def recently_added(limit: int = 24, window_months: int = 3, series: Optional[int
                 ORDER BY 
                     CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC,
                     COALESCE(first_added_at, updated_at, 0) DESC,
-                    id ASC
+                    id DESC
             ) AS src_rank
             FROM filtered
         )

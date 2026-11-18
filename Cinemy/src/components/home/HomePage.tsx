@@ -101,7 +101,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     setError(null);
     try {
       const [addedRes, upgradedRes, yearsRes, moviesRes, seriesRes] = await Promise.all([
-        getRecentlyAdded({ limit: 30, window_months: preferences.recently_added_window_months }).catch(() => ({ items: [], total: 0, window_months: 3 })),
+        getRecentlyAdded({ limit: 30, window_months: preferences.recently_added_window_months, latest_crawl: true }).catch(() => ({ items: [], total: 0, window_months: 3 })),
         getRecentlyUpgraded({ limit: 30, window_months: preferences.recently_upgraded_window_months }).catch(() => ({ items: [], total: 0, window_months: 3 })),
         getCatalogYears().catch(() => ({ years: [], older_count: 0 })),
         getMovies({ per_page: 80, series: 0, sort: 'recent' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 80, has_more: false })),

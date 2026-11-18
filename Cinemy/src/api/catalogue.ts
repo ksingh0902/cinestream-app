@@ -41,11 +41,12 @@ export async function getMovies(params: CatalogFilterParams = {}): Promise<Catal
 /**
  * Discovery Row: Titles first discovered within configured window (GET /api/catalog/recently-added)
  */
-export async function getRecentlyAdded(params: { limit?: number; window_months?: number; series?: number } = {}): Promise<DiscoveryResponse> {
+export async function getRecentlyAdded(params: { limit?: number; window_months?: number; series?: number; latest_crawl?: boolean } = {}): Promise<DiscoveryResponse> {
   const query = new URLSearchParams();
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.window_months !== undefined) query.set('window_months', String(params.window_months));
   if (params.series !== undefined) query.set('series', String(params.series));
+  if (params.latest_crawl !== undefined) query.set('latest_crawl', params.latest_crawl ? 'true' : 'false');
   const qs = query.toString();
   return apiClient.get<DiscoveryResponse>(`/api/catalog/recently-added${qs ? `?${qs}` : ''}`);
 }

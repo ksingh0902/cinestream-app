@@ -365,6 +365,44 @@ class TestHomepageDiscovery(unittest.TestCase):
         for item in data_q.get("movies", []):
             self.assertEqual(item.get("quality"), "4K")
 
+    # --- Scenario 12: latest_crawl=true excludes older crawl batches ---
+    def test_12_recently_added_latest_crawl_only(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        stale_ts = now - (10 * 86400)  # 10 days ago (still within 3 months, but not latest crawl)
+        url_stale = "https://example.com/movie/stale-crawl-item"
+        url_fresh = "https://example.com/movie/fresh-crawl-item"
+
+        upsert(con, {
+            "url": url_stale,
+            "title": "Stale Crawl Title",
+            "year": "2026",
+            "quality": "HD",
+            "is_series": 0,
+            "source": "dooflix",
+            "poster": "https://example.com/stale.jpg",
+        })
+        con.execute("UPDATE movies SET first_added_at = ?, updated_at = ? WHERE url = ?", (stale_ts, stale_ts, url_stale))
+
+        upsert(con, {
+            "url": url_fresh,
+            "title": "Fresh Crawl Title",
+            "year": "2026",
+            "quality": "HD",
+            "is_series": 0,
+            "source": "yomovies",
+            "poster": "https://example.com/fresh.jpg",
+        })
+        con.execute("UPDATE movies SET first_added_at = ?, updated_at = ? WHERE url = ?", (now, now, url_fresh))
+        con.commit()
+        con.close()
+
+        resp = self.client.get("/api/catalog/recently-added?limit=30&window_months=3&latest_crawl=true")
+        self.assertEqual(resp.status_code, 200)
+        titles = [i["title"] for i in resp.json()["items"]]
+        self.assertIn("Fresh Crawl Title", titles)
+        self.assertNotIn("Stale Crawl Title", titles)
+
 
 if __name__ == "__main__":
     unittest.main()
