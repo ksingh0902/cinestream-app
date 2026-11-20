@@ -11,6 +11,8 @@ interface DiscoveryRowProps {
   count?: number;
   items: MovieItem[];
   loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   emptyMessage?: string;
   onSelectMovie: (id: number, title: string) => void;
   onSeeAll?: () => void;
@@ -24,6 +26,8 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
   icon,
   items,
   loading = false,
+  error = null,
+  onRetry,
   emptyMessage = 'No titles found in this section.',
   onSelectMovie,
   onSeeAll,
@@ -87,6 +91,20 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
       {loading ? (
         <div className="discovery-row-loading">
           <LoadingSkeleton count={6} />
+        </div>
+      ) : error ? (
+        <div className="discovery-empty-state" role="alert">
+          <p>{error}</p>
+          {onRetry && (
+            <button
+              type="button"
+              className="discovery-btn-see-all"
+              onClick={onRetry}
+              style={{ marginTop: '10px' }}
+            >
+              Retry
+            </button>
+          )}
         </div>
       ) : items.length === 0 ? (
         <div className="discovery-empty-state">

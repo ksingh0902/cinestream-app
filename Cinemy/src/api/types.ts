@@ -8,6 +8,8 @@ export interface ApiErrorPayload {
   error?: string;
   retryAfter?: number;
   isNetworkError?: boolean;
+  isTimeout?: boolean;
+  isAborted?: boolean;
 }
 
 export class ApiError extends Error {
@@ -15,6 +17,8 @@ export class ApiError extends Error {
   public detail?: string;
   public retryAfter?: number;
   public isNetworkError: boolean;
+  public isTimeout: boolean;
+  public isAborted: boolean;
 
   constructor(payload: ApiErrorPayload) {
     super(payload.message);
@@ -23,6 +27,8 @@ export class ApiError extends Error {
     this.detail = payload.detail || payload.error;
     this.retryAfter = payload.retryAfter;
     this.isNetworkError = Boolean(payload.isNetworkError);
+    this.isTimeout = Boolean(payload.isTimeout);
+    this.isAborted = Boolean(payload.isAborted);
   }
 }
 

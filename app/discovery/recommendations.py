@@ -270,13 +270,15 @@ def get_recommended_titles(
 ) -> dict[str, Any]:
     """
     Return personalized Recommended for You titles strictly scoped to `viewer_key`.
-    Falls back deterministically to Trending Now when the viewer has insufficient watch history.
+    Personalization eligibility is strictly server-side (`viewer_activity` table):
+    device-local client `seed_ids` are ignored so the same authenticated account
+    receives consistent discovery behaviour across Website, Mobile Browser, and WAP/PWA.
+    Falls back deterministically to Evergreen Picks when no server-side viewer activity exists.
     """
     limit = min(MAX_REC_LIMIT, max(1, int(limit)))
-    clean_seeds = sorted({int(x) for x in (seed_ids or []) if isinstance(x, int) and x > 0})[:MAX_SEED_IDS]
     clean_excludes = sorted({int(x) for x in (exclude_ids or []) if isinstance(x, int) and x > 0})[:MAX_SEED_IDS]
 
-    cache_key = (viewer_key, tuple(clean_seeds), tuple(clean_excludes), limit)
+    cache_key = (viewer_key, tuple(clean_excludes), limit)
     now_mono = time.monotonic()
     with _rec_cache_lock:
         cached = _rec_cache.get(cache_key)
@@ -284,14 +286,11 @@ def get_recommended_titles(
             return cached[1]
 
     with get_db_connection() as conn:
-        # 1. Gather server-side per-viewer history (if viewer_activity exists)
+        # 1. Gather strictly server-side per-viewer history (if viewer_activity exists)
         srv_weights, srv_excludes = _load_server_viewer_history(conn, viewer_key)
 
         combined_weights: dict[int, float] = dict(srv_weights)
-        for sid in clean_seeds:
-            combined_weights.setdefault(sid, 1.0)
-
-        all_exclude_ids: set[int] = set(srv_excludes) | set(clean_excludes) | set(clean_seeds)
+        all_exclude_ids: set[int] = set(srv_excludes) | set(clean_excludes)
 
         if not combined_weights:
             # New user with no watch history -> Evergreen Picks (distinct from Trending Now)

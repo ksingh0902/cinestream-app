@@ -353,22 +353,24 @@ class TestTrendingAndRecommendations(unittest.TestCase):
         self.assertNotIn("The Conjuring", titles_b)
         self.assertNotEqual(titles_a[0], titles_b[0])
 
-    def test_06_recommended_accepts_viewer_seed_and_exclude_ids_deterministically(self):
+    def test_06_recommended_ignores_device_local_seed_ids_for_cross_platform_consistency(self):
+        """Option A: client-supplied seed_ids without server-side viewer_activity must fall back to Evergreen Picks."""
         seed_id = self.ids["ym-conjuring"]
-        r1 = self.client.get(
+        r_wap = self.client.get(
             f"/api/discovery/recommended?limit=5&seed_ids={seed_id}&exclude_ids={seed_id}",
             headers={"X-Test-User": "carol"},
         ).json()
-        r2 = self.client.get(
-            f"/api/discovery/recommended?limit=5&seed_ids={seed_id}&exclude_ids={seed_id}",
+        r_web = self.client.get(
+            "/api/discovery/recommended?limit=5",
             headers={"X-Test-User": "carol"},
         ).json()
 
-        self.assertTrue(r1["personalized"])
-        self.assertEqual([i["id"] for i in r1["items"]], [i["id"] for i in r2["items"]])
-        titles = [i["title"] for i in r1["items"]]
-        self.assertNotIn("The Conjuring", titles)
-        self.assertIn("Insidious", titles)
+        self.assertFalse(r_wap["personalized"])
+        self.assertFalse(r_web["personalized"])
+        self.assertEqual(r_wap["mode"], "evergreen_fallback")
+        self.assertEqual(r_web["mode"], "evergreen_fallback")
+        self.assertGreater(len(r_wap["items"]), 0)
+        self.assertGreater(len(r_web["items"]), 0)
 
     def test_07_trending_ranking_differs_from_evergreen_popular_ranking(self):
         """New Movie with high recent activity tops Trending; 2010 high-rated classic tops Popular."""
