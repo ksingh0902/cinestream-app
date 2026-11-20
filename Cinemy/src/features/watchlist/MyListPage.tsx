@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { HardDrive, Bookmark, X } from 'lucide-react';
+import { Bookmark, X } from 'lucide-react';
 import { useWatchlist } from './useWatchlist';
 import { useRouter } from '../../router';
 import { getPosterUrl, formatRating } from '../../utils/formatters';
@@ -53,13 +53,6 @@ export const MyListPage: React.FC = () => {
             Series ({items.filter((it) => it.is_series).length})
           </button>
         </div>
-      </div>
-
-      <div className="storage-disclosure-banner">
-        <span className="disclosure-icon"><HardDrive size={15} strokeWidth={1.5} /></span>
-        <span>
-          <strong>Device-local storage:</strong> My List items are safely stored on this device.
-        </span>
       </div>
 
       {filteredItems.length === 0 ? (

@@ -52,6 +52,236 @@ _non_m7_title_keys: set[tuple[str, str]] | None = None
 _non_m7_base_titles: set[str] | None = None
 _non_m7_title_keys_lock = threading.Lock()
 
+_poster_fallbacks_map: dict[tuple[str, int], list[str]] | None = None
+_poster_fallbacks_lock = threading.Lock()
+
+_canonical_source_counts: dict[tuple[str, int], int] | None = None
+_canonical_source_counts_lock = threading.Lock()
+
+_poster_resolve_cache: dict[tuple[str, str, int], tuple[float, Optional[str]]] = {}
+_poster_resolve_lock = threading.Lock()
+_POSTER_RESOLVE_TTL = 86400.0
+_POSTER_RESOLVE_MAX = 2048
+
+
+def _get_canonical_source_counts() -> dict[tuple[str, int], int]:
+    """Cached map of canonical (normalized_title, is_series) -> number of distinct catalogue sources (1..4)."""
+    global _canonical_source_counts
+    with _canonical_source_counts_lock:
+        if _canonical_source_counts is not None:
+            return _canonical_source_counts
+        grouped: dict[tuple[str, int], set[str]] = {}
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT title, is_series, source FROM movies WHERE title IS NOT NULL AND source IS NOT NULL"
+            ).fetchall()
+            for r in rows:
+                nt = _normalized_title(r["title"])
+                if not nt:
+                    continue
+                key = (nt, 1 if r["is_series"] else 0)
+                grouped.setdefault(key, set()).add(str(r["source"]).lower())
+        _canonical_source_counts = {k: len(v) for k, v in grouped.items()}
+        return _canonical_source_counts
+
+
+def get_canonical_source_count(title: str | None, is_series: int | bool | None) -> int:
+    nt = _normalized_title(title)
+    if not nt:
+        return 1
+    return _get_canonical_source_counts().get((nt, 1 if is_series else 0), 1)
+
+
+def _clean_poster_lookup_title(title: str | None) -> str:
+    """Clean noisy scraped title suffixes for TMDB poster lookup (e.g. 'Mastaney (2023) Punjabi' -> 'Mastaney')."""
+    value = str(title or "").strip()
+    value = re.sub(r"\s*[\[(]\s*(?:19|20)\d{2}\s*[\])]", " ", value)
+    value = re.sub(r"\s*[\[(][^)\]]*(?:netflix|amazon|prime|hotstar|zee5|sonyliv|tvf|originals?|hindi|punjabi|dubbed)[^)\]]*[\])]", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(?:season\s*\d+|s\d+|episode\s*\d+|ep\s*\d+|part\s*\d+|vol\s*\d+)\b.*$", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(?:hindi dubbed|hollywood dubbed|dual[ -]?audio|english dubbed|punjabi|hindi|tamil|telugu|malayalam|watch online.*|full movie|web series)\b", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*[-–—|:]\s*$", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+@router.get("/api/poster/resolve")
+def resolve_poster_fallback(
+    title: str = Query(..., min_length=1, max_length=200),
+    year: Optional[str] = Query(default=None, max_length=10),
+    is_series: int = Query(default=0, ge=0, le=1),
+):
+    """
+    Bounded, cached on-demand poster resolver called ONLY when a card's primary poster
+    and DB mirror fallbacks fail to load in the browser. Zero DB writes, 24h in-memory cache.
+    """
+    clean_title = _clean_poster_lookup_title(title)
+    if not clean_title:
+        return {"poster_url": None, "source": "none"}
+
+    clean_year = str(year or "").strip()
+    if not (clean_year.isdigit() and len(clean_year) == 4):
+        clean_year = ""
+
+    cache_key = (clean_title.lower(), clean_year, int(is_series))
+    now_mono = time.monotonic()
+    with _poster_resolve_lock:
+        cached = _poster_resolve_cache.get(cache_key)
+        if cached and (now_mono - cached[0] < _POSTER_RESOLVE_TTL):
+            return {"poster_url": cached[1], "source": "cache" if cached[1] else "none"}
+
+    # 1. Check in-memory DB mirror map first (zero network)
+    nt = _normalized_title(title)
+    if nt:
+        mirrors = _get_poster_fallbacks_map().get((nt, int(is_series))) or []
+        for u in mirrors:
+            if "image.tmdb.org" in u.lower() or "images.metahub.space" in u.lower():
+                with _poster_resolve_lock:
+                    _poster_resolve_cache[cache_key] = (now_mono, u)
+                return {"poster_url": u, "source": "mirror"}
+
+    # 2. Bounded single-shot IMDb suggestion lookup (fast CloudFront CDN, no ISP resets, works for regional/Punjabi too)
+    resolved_url: Optional[str] = None
+    resolved_src = "none"
+    try:
+        import urllib.parse
+        import httpx
+
+        first_ch = next((c for c in clean_title.lower() if c.isalnum()), "")
+        if first_ch:
+            slug = urllib.parse.quote(clean_title.lower().replace(" ", "_"))
+            with httpx.Client(timeout=3.5, headers={"User-Agent": "Mozilla/5.0"}) as client:
+                r = client.get(f"https://v3.sg.media-imdb.com/suggestion/{first_ch}/{slug}.json")
+                if r.status_code == 200:
+                    entries = r.json().get("d") or []
+                    # Prefer exact title (tt*) matches matching year when provided
+                    best_url: Optional[str] = None
+                    fallback_tt_url: Optional[str] = None
+                    for item in entries:
+                        iid = str(item.get("id") or "")
+                        if not iid.startswith("tt"):
+                            continue
+                        img_url = str((item.get("i") or {}).get("imageUrl") or "").strip()
+                        if not img_url.startswith("http"):
+                            continue
+                        # Resize large Amazon master image to lightweight poster (~380px wide)
+                        if "m.media-amazon.com" in img_url and img_url.endswith("._V1_.jpg"):
+                            img_url = img_url[:-9] + "._V1_QL75_UX380_.jpg"
+                        item_year = str(item.get("y") or "").strip()
+                        if clean_year and item_year == clean_year:
+                            best_url = img_url
+                            break
+                        if not fallback_tt_url:
+                            fallback_tt_url = img_url
+                    resolved_url = best_url or fallback_tt_url
+                    if resolved_url:
+                        resolved_src = "imdb"
+    except Exception:
+        resolved_url = None
+
+    # 3. Fallback to TMDB if IMDb suggestion did not yield a poster
+    if not resolved_url:
+        try:
+            import httpx
+            from ..adapters.embed_helper import TMDB_API_KEY
+
+            api_key = os.getenv("TMDB_API_KEY") or TMDB_API_KEY
+            if api_key:
+                media = "tv" if is_series else "movie"
+                params: dict[str, str] = {"api_key": api_key, "query": clean_title}
+                if clean_year:
+                    params["first_air_date_year" if is_series else "year"] = clean_year
+
+                with httpx.Client(timeout=3.5) as client:
+                    resp = client.get(f"https://api.themoviedb.org/3/search/{media}", params=params)
+                    results = resp.json().get("results", []) if resp.status_code == 200 else []
+                    if not results and clean_year:
+                        params.pop("first_air_date_year", None)
+                        params.pop("year", None)
+                        resp = client.get(f"https://api.themoviedb.org/3/search/{media}", params=params)
+                        results = resp.json().get("results", []) if resp.status_code == 200 else []
+                    if not results:
+                        resp = client.get(
+                            "https://api.themoviedb.org/3/search/multi",
+                            params={"api_key": api_key, "query": clean_title},
+                        )
+                        results = resp.json().get("results", []) if resp.status_code == 200 else []
+
+                    for item in results:
+                        pp = item.get("poster_path")
+                        if pp and isinstance(pp, str):
+                            resolved_url = f"https://image.tmdb.org/t/p/w500{pp}"
+                            resolved_src = "tmdb"
+                            break
+        except Exception:
+            resolved_url = None
+
+    with _poster_resolve_lock:
+        if len(_poster_resolve_cache) >= _POSTER_RESOLVE_MAX:
+            oldest = min(_poster_resolve_cache, key=lambda k: _poster_resolve_cache[k][0])
+            _poster_resolve_cache.pop(oldest, None)
+        _poster_resolve_cache[cache_key] = (now_mono, resolved_url)
+
+    return {"poster_url": resolved_url, "source": resolved_src}
+
+
+def _is_valid_poster_url(val: str | None) -> bool:
+    s = str(val or "").strip()
+    if not s or s in ("None", "null") or "logo.png" in s or s.startswith("/assets/"):
+        return False
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def _poster_host_priority(url: str) -> int:
+    low = url.lower()
+    if "image.tmdb.org" in low:
+        return 0
+    if "images.metahub.space" in low:
+        return 1
+    if "m.media-amazon.com" in low and "xkeyxkfqcgc@" in low:
+        return 2
+    if "m.media-amazon.com" in low and "xkeyxkfqcgde" in low:
+        return 4
+    return 3
+
+
+def _get_poster_fallbacks_map() -> dict[tuple[str, int], list[str]]:
+    """Build a lightweight in-memory map of alternative valid poster URLs per canonical (title, is_series)."""
+    global _poster_fallbacks_map
+    with _poster_fallbacks_lock:
+        if _poster_fallbacks_map is not None:
+            return _poster_fallbacks_map
+        grouped: dict[tuple[str, int], set[str]] = {}
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT title, is_series, poster, poster_url FROM movies WHERE title IS NOT NULL AND (COALESCE(poster, poster_url, '') != '')"
+            ).fetchall()
+            for r in rows:
+                nt = _normalized_title(r["title"])
+                if not nt:
+                    continue
+                key = (nt, 1 if r["is_series"] else 0)
+                for col in ("poster", "poster_url"):
+                    u = str(r[col] or "").strip()
+                    if _is_valid_poster_url(u):
+                        grouped.setdefault(key, set()).add(u)
+        compiled: dict[tuple[str, int], list[str]] = {}
+        for k, urls in grouped.items():
+            if len(urls) > 1:
+                compiled[k] = sorted(urls, key=lambda u: (_poster_host_priority(u), u))[:4]
+        _poster_fallbacks_map = compiled
+        return _poster_fallbacks_map
+
+
+def _get_fallback_posters(title: str | None, is_series: int | bool | None, exclude_url: str | None) -> list[str]:
+    nt = _normalized_title(title)
+    if not nt:
+        return []
+    key = (nt, 1 if is_series else 0)
+    urls = _get_poster_fallbacks_map().get(key)
+    if not urls:
+        return []
+    ex = str(exclude_url or "").strip()
+    return [u for u in urls if u != ex][:3]
+
 
 def _get_non_m7_title_keys() -> tuple[set[tuple[str, str]], set[str]]:
     global _non_m7_title_keys, _non_m7_base_titles
@@ -98,12 +328,21 @@ def is_movie_available_on_primary_sources(title: str | None, year: str | int | N
 
 def invalidate_catalog_cache() -> None:
     """Clear in-memory catalog cache when new titles are synced or updated."""
-    global _non_m7_title_keys, _non_m7_base_titles
+    global _non_m7_title_keys, _non_m7_base_titles, _poster_fallbacks_map, _canonical_source_counts
     with _filter_cache_lock:
         _filter_cache.clear()
     with _non_m7_title_keys_lock:
         _non_m7_title_keys = None
         _non_m7_base_titles = None
+    with _poster_fallbacks_lock:
+        _poster_fallbacks_map = None
+    with _canonical_source_counts_lock:
+        _canonical_source_counts = None
+    try:
+        from ..discovery import invalidate_discovery_cache
+        invalidate_discovery_cache()
+    except Exception:
+        pass
 
 
 def prewarm_catalog_cache() -> None:
@@ -182,6 +421,9 @@ def _format_row(row: dict) -> dict:
         d["poster_url"] = d["poster"]
     if not d.get("poster") and d.get("poster_url"):
         d["poster"] = d["poster_url"]
+    fallbacks = _get_fallback_posters(d.get("title"), d.get("is_series"), d.get("poster"))
+    if fallbacks:
+        d["poster_fallbacks"] = fallbacks
     if not d.get("detail_url") and d.get("url"):
         d["detail_url"] = d["url"]
     if not d.get("url") and d.get("detail_url"):

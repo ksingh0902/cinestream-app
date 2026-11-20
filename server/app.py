@@ -21,7 +21,7 @@ from scraper.extract import parse_detail, EMBED_RE
 from scraper.http import HttpClient, headers_for
 from scraper.resolve import StreamResolver
 from scraper.store import connect
-from app.api import catalog_router, stream_router
+from app.api import catalog_router, discovery_router, stream_router
 from app.auth.routes import auth_router
 from app.auth.middleware import PrivateAccessMiddleware
 from app.auth.store import init_auth_db
@@ -32,6 +32,7 @@ import os
 app = FastAPI(title="CineMyMovies API")
 app.include_router(auth_router)
 app.include_router(catalog_router)
+app.include_router(discovery_router)
 app.include_router(stream_router)
 
 app.add_middleware(PrivateAccessMiddleware)

@@ -3,9 +3,12 @@ import {
   CatalogFilterParams,
   CatalogResponse,
   DiscoveryResponse,
+  EvergreenResponse,
   HomepagePreferences,
   MovieItem,
+  RecommendedResponse,
   SearchResponse,
+  TrendingResponse,
   YearsResponse,
 } from '../types/catalogue';
 
@@ -64,6 +67,53 @@ export async function getRecentlyUpgraded(params: { limit?: number; window_month
 }
 
 /**
+ * Discovery Row: Trending Now (GET /api/discovery/trending)
+ */
+export async function getTrending(params: { limit?: number; window_days?: number } = {}): Promise<TrendingResponse> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.window_days !== undefined) query.set('window_days', String(params.window_days));
+  const qs = query.toString();
+  return apiClient.get<TrendingResponse>(`/api/discovery/trending${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Discovery Row: Evergreen Picks (GET /api/discovery/evergreen)
+ */
+export async function getEvergreen(params: {
+  limit?: number;
+  exclude_ids?: number[];
+} = {}): Promise<EvergreenResponse> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.exclude_ids && params.exclude_ids.length > 0) {
+    query.set('exclude_ids', params.exclude_ids.slice(0, 50).join(','));
+  }
+  const qs = query.toString();
+  return apiClient.get<EvergreenResponse>(`/api/discovery/evergreen${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Discovery Row: Recommended for You (GET /api/discovery/recommended)
+ */
+export async function getRecommended(params: {
+  limit?: number;
+  seed_ids?: number[];
+  exclude_ids?: number[];
+} = {}): Promise<RecommendedResponse> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.seed_ids && params.seed_ids.length > 0) {
+    query.set('seed_ids', params.seed_ids.slice(0, 50).join(','));
+  }
+  if (params.exclude_ids && params.exclude_ids.length > 0) {
+    query.set('exclude_ids', params.exclude_ids.slice(0, 50).join(','));
+  }
+  const qs = query.toString();
+  return apiClient.get<RecommendedResponse>(`/api/discovery/recommended${qs ? `?${qs}` : ''}`);
+}
+
+/**
  * Release year metadata and title counts (GET /api/catalog/years)
  */
 export async function getCatalogYears(): Promise<YearsResponse> {
@@ -111,4 +161,36 @@ export async function getMovie(id: number | string): Promise<MovieItem> {
  */
 export async function getHealth(): Promise<{ ok: boolean; catalogue: string; time: number }> {
   return apiClient.get<{ ok: boolean; catalogue: string; time: number }>('/api/health');
+}
+
+const posterResolveSessionCache = new Map<string, Promise<string | null>>();
+
+/**
+ * Bounded, session-cached on-demand poster resolver (GET /api/poster/resolve).
+ * Called ONLY when a card's primary poster and DB mirror fallbacks all fail to load.
+ */
+export function resolvePosterFallback(params: {
+  title: string;
+  year?: string | null;
+  is_series?: boolean | number;
+}): Promise<string | null> {
+  const title = (params.title || '').trim();
+  if (!title) return Promise.resolve(null);
+  const year = (params.year || '').trim();
+  const isSeries = params.is_series ? 1 : 0;
+  const cacheKey = `${title.toLowerCase()}|${year}|${isSeries}`;
+
+  const existing = posterResolveSessionCache.get(cacheKey);
+  if (existing) return existing;
+
+  const query = new URLSearchParams({ title, is_series: String(isSeries) });
+  if (year) query.set('year', year);
+
+  const req = apiClient
+    .get<{ poster_url: string | null; source: string }>(`/api/poster/resolve?${query.toString()}`)
+    .then((res) => (res && typeof res.poster_url === 'string' && res.poster_url.trim() ? res.poster_url.trim() : null))
+    .catch(() => null);
+
+  posterResolveSessionCache.set(cacheKey, req);
+  return req;
 }

@@ -36,11 +36,44 @@ export function getPosterFallbackSvg(title: string, year?: string | null): strin
 }
 
 /**
+ * Checks whether a poster URL string is structurally valid (not null, placeholder, or relative dummy asset).
+ */
+export function isValidPosterUrl(poster: string | null | undefined): boolean {
+  const val = (poster || '').trim();
+  if (!val || val === 'None' || val === 'null' || val.includes('logo.png') || val.startsWith('/assets/')) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Builds a deduplicated, bounded list of candidate poster URLs (primary + mirror fallbacks).
+ */
+export function getPosterCandidates(
+  poster: string | null | undefined,
+  posterUrl?: string | null,
+  posterFallbacks?: string[] | null
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const raw = [poster, posterUrl, ...(posterFallbacks || [])];
+  for (const item of raw) {
+    const val = (item || '').trim();
+    if (isValidPosterUrl(val) && !seen.has(val)) {
+      seen.add(val);
+      out.push(val);
+      if (out.length >= 4) break;
+    }
+  }
+  return out;
+}
+
+/**
  * Normalizes poster URLs and substitutes fallback placeholder for null/invalid URLs.
  */
 export function getPosterUrl(poster: string | null | undefined, title: string, year?: string | null): string {
   const val = (poster || '').trim();
-  if (!val || val === 'None' || val === 'null' || val.includes('logo.png') || val.startsWith('/assets/')) {
+  if (!isValidPosterUrl(val)) {
     return getPosterFallbackSvg(title, year);
   }
   return val;

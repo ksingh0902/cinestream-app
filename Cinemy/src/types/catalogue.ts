@@ -4,6 +4,7 @@ export interface MovieItem {
   year: string | null;
   poster: string | null;
   poster_url?: string | null;
+  poster_fallbacks?: string[];
   rating: number | null;
   imdb: string | null;
   quality?: string | null;
@@ -40,6 +41,32 @@ export interface DiscoveryResponse {
   total: number;
   items: MovieItem[];
   window_months: number;
+}
+
+export interface TrendingResponse {
+  total: number;
+  items: MovieItem[];
+  mode: 'activity' | 'fallback_trending';
+  is_fallback: boolean;
+}
+
+export interface RecommendedResponse {
+  total: number;
+  items: MovieItem[];
+  personalized: boolean;
+  mode: 'personalized' | 'evergreen_fallback' | 'popular_fallback' | 'fallback_trending';
+}
+
+export interface EvergreenResponse {
+  total: number;
+  items: MovieItem[];
+  mode: 'evergreen_picks';
+}
+
+export interface PopularResponse {
+  total: number;
+  items: MovieItem[];
+  mode: 'evergreen_picks' | 'evergreen_popular';
 }
 
 export interface YearCountItem {

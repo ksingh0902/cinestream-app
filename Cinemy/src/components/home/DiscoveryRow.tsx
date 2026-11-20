@@ -22,7 +22,6 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
   id,
   title,
   icon,
-  count,
   items,
   loading = false,
   emptyMessage = 'No titles found in this section.',
@@ -48,9 +47,6 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
         <div className="discovery-title-group">
           {icon && <span className="discovery-icon">{icon}</span>}
           <h2 className="discovery-heading">{title}</h2>
-          {count !== undefined && count > 0 && (
-            <span className="discovery-count-badge">{count}</span>
-          )}
         </div>
 
         <div className="discovery-actions">
@@ -98,8 +94,8 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
         </div>
       ) : (
         <div className="discovery-row-track" ref={scrollContainerRef}>
-          {items.map((movie, idx) => (
-            <div key={`${id}-card-${movie.id}-${idx}`} className="discovery-card-wrapper">
+          {items.map((movie) => (
+            <div key={`${id}-card-${movie.id}`} className="discovery-card-wrapper">
               <ContentCard
                 movie={movie}
                 onSelect={onSelectMovie}

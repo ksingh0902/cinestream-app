@@ -1,16 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Sparkles, TrendingUp, Film, Tv } from 'lucide-react';
+import { Sparkles, TrendingUp, Flame, ThumbsUp, Film, Tv } from 'lucide-react';
 import { CategorySelection } from '../layout/CategoryBar';
 import { HomepagePreferences, MovieItem, YearCountItem } from '../../types/catalogue';
 import {
   getMovies,
   getRecentlyAdded,
   getRecentlyUpgraded,
+  getTrending,
+  getRecommended,
   getCatalogYears,
   getHomepagePreferences,
 } from '../../api/catalogue';
 import { FeaturedHero } from './FeaturedHero';
-import { ContinueWatchingSection, ContinueWatchingDisplayItem } from '../../features/continue-watching';
+import {
+  ContinueWatchingSection,
+  ContinueWatchingDisplayItem,
+  resolveContinueWatchingKey,
+  readContinueWatchingRecords,
+} from '../../features/continue-watching';
 import { DiscoveryRow } from './DiscoveryRow';
 import { BrowseByYear } from './BrowseByYear';
 import { ContentGrid } from './ContentGrid';
@@ -19,6 +26,7 @@ import { LoadingSkeleton } from '../common/LoadingSkeleton';
 import { ErrorBanner } from '../common/ErrorBanner';
 import { PlaybackTarget, PlayerModal } from '../../features/player';
 import { useRouter } from '../../router';
+import { useAuth } from '../../context/AuthContext';
 import { useWatchlist } from '../../features/watchlist';
 
 interface HomePageProps {
@@ -35,7 +43,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   onPlayTarget,
 }) => {
   const { navigate } = useRouter();
-  const { isInList, addItem, removeItem } = useWatchlist();
+  const { username, role, authenticated } = useAuth();
+  const { items: watchlistItems, isInList, addItem, removeItem } = useWatchlist();
 
   // Admin display preferences
   const [preferences, setPreferences] = useState<HomepagePreferences>({
@@ -50,6 +59,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   // Discovery row state
   const [recentlyAddedItems, setRecentlyAddedItems] = useState<MovieItem[]>([]);
   const [recentlyUpgradedItems, setRecentlyUpgradedItems] = useState<MovieItem[]>([]);
+  const [trendingItems, setTrendingItems] = useState<MovieItem[]>([]);
+  const [recommendedItems, setRecommendedItems] = useState<MovieItem[]>([]);
+  const [recommendedPersonalized, setRecommendedPersonalized] = useState<boolean>(false);
   const [catalogYears, setCatalogYears] = useState<YearCountItem[]>([]);
   const [olderYearsCount, setOlderYearsCount] = useState<number>(0);
   const [allMoviesPreview, setAllMoviesPreview] = useState<MovieItem[]>([]);
@@ -100,9 +112,23 @@ export const HomePage: React.FC<HomePageProps> = ({
     setInitialLoading(true);
     setError(null);
     try {
-      const [addedRes, upgradedRes, yearsRes, moviesRes, seriesRes] = await Promise.all([
+      // Collect authenticated viewer's own in-browser watch/watchlist IDs for personalization
+      const cwKey = resolveContinueWatchingKey(username, role, authenticated);
+      const cwRecords = authenticated ? readContinueWatchingRecords(cwKey) : [];
+      const cwSeedIds = cwRecords.map((r) => Number(r.id)).filter((id) => id > 0);
+      const cwExcludeIds = cwRecords
+        .filter((r) => Boolean(r.isCompleted) || (typeof r.progressPct === 'number' && r.progressPct >= 70))
+        .map((r) => Number(r.id))
+        .filter((id) => id > 0);
+      const wlSeedIds = watchlistItems.map((w) => Number(w.id)).filter((id) => id > 0);
+      const seedIds = Array.from(new Set([...cwSeedIds, ...wlSeedIds])).slice(0, 50);
+      const excludeIds = Array.from(new Set([...cwExcludeIds, ...cwSeedIds])).slice(0, 50);
+
+      const [addedRes, upgradedRes, trendingRes, recommendedRes, yearsRes, moviesRes, seriesRes] = await Promise.all([
         getRecentlyAdded({ limit: 30, window_months: preferences.recently_added_window_months, latest_crawl: true }).catch(() => ({ items: [], total: 0, window_months: 3 })),
         getRecentlyUpgraded({ limit: 30, window_months: preferences.recently_upgraded_window_months }).catch(() => ({ items: [], total: 0, window_months: 3 })),
+        getTrending({ limit: 50 }).catch(() => ({ items: [], total: 0, mode: 'fallback_trending' as const, is_fallback: true })),
+        getRecommended({ limit: 50, seed_ids: seedIds, exclude_ids: excludeIds }).catch(() => ({ items: [], total: 0, personalized: false, mode: 'evergreen_fallback' as const })),
         getCatalogYears().catch(() => ({ years: [], older_count: 0 })),
         getMovies({ per_page: 80, series: 0, sort: 'recent' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 80, has_more: false })),
         getMovies({ per_page: 80, series: 1, sort: 'recent' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 80, has_more: false })),
@@ -123,6 +149,9 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       setRecentlyAddedItems(recentAddedList);
       setRecentlyUpgradedItems(upgradedRes.items || []);
+      setTrendingItems(trendingRes.items || []);
+      setRecommendedItems(recommendedRes.items || []);
+      setRecommendedPersonalized(Boolean(recommendedRes.personalized));
       setCatalogYears(yearsRes.years || []);
       setOlderYearsCount(yearsRes.older_count || 0);
       setAllMoviesPreview(moviesPreview);
@@ -141,7 +170,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     } finally {
       setInitialLoading(false);
     }
-  }, [preferences.recently_added_window_months, preferences.recently_upgraded_window_months]);
+  }, [preferences.recently_added_window_months, preferences.recently_upgraded_window_months, username, role, authenticated, watchlistItems]);
 
   // Fetch filtered catalogue grid
   const fetchFilteredGrid = useCallback(
@@ -354,6 +383,8 @@ export const HomePage: React.FC<HomePageProps> = ({
         ...heroItems,
         ...recentlyAddedItems,
         ...recentlyUpgradedItems,
+        ...trendingItems,
+        ...recommendedItems,
         ...allMoviesPreview,
         ...allSeriesPreview,
         ...catalogMovies,
@@ -365,7 +396,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         navigate(`/movie/${id}`);
       }
     },
-    [heroItems, recentlyAddedItems, recentlyUpgradedItems, allMoviesPreview, allSeriesPreview, catalogMovies, navigate]
+    [heroItems, recentlyAddedItems, recentlyUpgradedItems, trendingItems, recommendedItems, allMoviesPreview, allSeriesPreview, catalogMovies, navigate]
   );
 
   const handleResumeContinueWatching = (item: ContinueWatchingDisplayItem) => {
@@ -461,7 +492,31 @@ export const HomePage: React.FC<HomePageProps> = ({
                   />
                 )}
 
-                {/* Section 3: Recently Upgraded (only shown when verified upgrades exist) */}
+                {/* Section 3: Trending Now */}
+                {trendingItems.length > 0 && (
+                  <DiscoveryRow
+                    id="section-trending-now"
+                    title="Trending Now"
+                    icon={<Flame size={18} strokeWidth={2} />}
+                    count={trendingItems.length}
+                    items={trendingItems}
+                    onSelectMovie={handleCardClick}
+                  />
+                )}
+
+                {/* Section 4: Recommended for You (or Evergreen Picks fallback for new viewers) */}
+                {recommendedItems.length > 0 && (
+                  <DiscoveryRow
+                    id="section-recommended-for-you"
+                    title={recommendedPersonalized ? 'Recommended for You' : 'Evergreen Picks'}
+                    icon={<ThumbsUp size={18} strokeWidth={2} />}
+                    count={recommendedItems.length}
+                    items={recommendedItems}
+                    onSelectMovie={handleCardClick}
+                  />
+                )}
+
+                {/* Recently Upgraded (only shown when verified upgrades exist) */}
                 {preferences.recently_upgraded_enabled && recentlyUpgradedItems.length > 0 && (
                   <DiscoveryRow
                     id="section-recently-upgraded"

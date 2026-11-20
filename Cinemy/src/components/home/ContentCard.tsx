@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { MovieItem } from '../../types/catalogue';
-import { getPosterUrl, getPosterFallbackSvg, formatRating } from '../../utils/formatters';
+import { getPosterCandidates, getPosterFallbackSvg, formatRating } from '../../utils/formatters';
+import { resolvePosterFallback } from '../../api/catalogue';
+
+export type PosterLoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 interface ContentCardProps {
   movie: MovieItem;
@@ -11,13 +14,62 @@ interface ContentCardProps {
 
 export const ContentCard = React.memo<ContentCardProps>(
   ({ movie, onSelect, tabIndex = 0, upgradeBadge }) => {
-    const [imgSrc, setImgSrc] = useState<string>(() =>
-      getPosterUrl(movie.poster || movie.poster_url, movie.title, movie.year)
+    const fallbackSvg = useMemo(
+      () => getPosterFallbackSvg(movie.title, movie.year),
+      [movie.title, movie.year]
     );
+
+    const fallbacksKey = (movie.poster_fallbacks || []).join('|');
+    const candidates = useMemo(
+      () => getPosterCandidates(movie.poster, movie.poster_url, movie.poster_fallbacks),
+      [movie.poster, movie.poster_url, fallbacksKey]
+    );
+    const candidatesKey = candidates.join('|');
+
+    const [candidateIdx, setCandidateIdx] = useState<number>(0);
+    const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+    const [remoteAttempted, setRemoteAttempted] = useState<boolean>(false);
+    const [loadState, setLoadState] = useState<PosterLoadState>(() =>
+      candidates.length > 0 ? 'loading' : 'error'
+    );
+    const imgRef = useRef<HTMLImageElement | null>(null);
+    const isMountedRef = useRef<boolean>(true);
+
+    useEffect(() => {
+      isMountedRef.current = true;
+      return () => {
+        isMountedRef.current = false;
+      };
+    }, []);
+
+    // Reset image lifecycle cleanly when poster URLs change for this card
+    useEffect(() => {
+      setCandidateIdx(0);
+      setResolvedUrl(null);
+      setRemoteAttempted(false);
+      setLoadState(candidates.length > 0 ? 'loading' : 'error');
+    }, [candidatesKey, candidates.length]);
+
+    const activeSrc =
+      loadState === 'error'
+        ? fallbackSvg
+        : resolvedUrl
+        ? resolvedUrl
+        : candidateIdx < candidates.length
+        ? candidates[candidateIdx]
+        : fallbackSvg;
+
+    // Handle images already resolved in browser cache before React attaches onLoad
+    useEffect(() => {
+      const img = imgRef.current;
+      if (!img || loadState !== 'loading') return;
+      if (img.complete && img.naturalWidth > 0) {
+        setLoadState('loaded');
+      }
+    }, [activeSrc, loadState]);
 
     const rating = formatRating(movie.rating, movie.imdb);
     const isSeries = Boolean(movie.is_series);
-    const isDubbed = Boolean(movie.is_hindi_dubbed);
     const effectiveUpgradeBadge = upgradeBadge || movie.upgradeBadge || movie.latest_quality_transition;
 
     const handleClick = () => {
@@ -31,8 +83,43 @@ export const ContentCard = React.memo<ContentCardProps>(
       }
     };
 
+    const handleImgLoad = () => {
+      if (loadState !== 'error') {
+        setLoadState('loaded');
+      }
+    };
+
     const handleImgError = () => {
-      setImgSrc(getPosterFallbackSvg(movie.title, movie.year));
+      if (loadState === 'error') return;
+
+      // 1. Advance through DB mirror fallbacks first (zero extra API traffic)
+      if (!resolvedUrl && candidateIdx + 1 < candidates.length) {
+        setCandidateIdx((prev) => prev + 1);
+        setLoadState('loading');
+        return;
+      }
+
+      // 2. If all DB candidates failed, attempt ONE bounded on-demand backend poster resolve
+      if (!remoteAttempted && movie.title) {
+        setRemoteAttempted(true);
+        resolvePosterFallback({
+          title: movie.title,
+          year: movie.year,
+          is_series: movie.is_series,
+        }).then((url) => {
+          if (!isMountedRef.current) return;
+          if (url && !candidates.includes(url)) {
+            setResolvedUrl(url);
+            setLoadState('loading');
+          } else {
+            setLoadState('error');
+          }
+        });
+        return;
+      }
+
+      // 3. Permanent failure -> terminate loading and display CINEMY SVG placeholder
+      setLoadState('error');
     };
 
     return (
@@ -44,23 +131,24 @@ export const ContentCard = React.memo<ContentCardProps>(
         onKeyDown={handleKeyDown}
         aria-label={`${movie.title} (${movie.year || 'Unknown Year'}), ${isSeries ? 'Series' : 'Movie'}${rating ? `, Rating: ${rating}` : ''}`}
       >
-        <div className="card-poster-wrap">
+        <div className="card-poster-wrap" data-poster-state={loadState}>
           <img
+            ref={imgRef}
             className="card-poster-img"
-            src={imgSrc}
+            src={activeSrc}
             alt={movie.title}
             loading="lazy"
+            onLoad={handleImgLoad}
             onError={handleImgError}
           />
 
-          {/* Top-left Badges (Type & Dubbing) */}
+          {/* Top-left Badge (Type) */}
           <div className="card-badge-top-left">
             {isSeries ? (
               <span className="badge-tag series">Series</span>
             ) : (
               <span className="badge-tag movie">Movie</span>
             )}
-            {isDubbed && <span className="badge-tag dubbed">Hindi Dub</span>}
           </div>
 
           {/* Top-right Rating Badge */}
@@ -97,6 +185,7 @@ export const ContentCard = React.memo<ContentCardProps>(
       prevProps.movie.title === nextProps.movie.title &&
       prevProps.movie.poster === nextProps.movie.poster &&
       prevProps.movie.poster_url === nextProps.movie.poster_url &&
+      (prevProps.movie.poster_fallbacks || []).join('|') === (nextProps.movie.poster_fallbacks || []).join('|') &&
       prevProps.movie.rating === nextProps.movie.rating &&
       prevProps.movie.quality === nextProps.movie.quality &&
       prevProps.movie.latest_quality_transition === nextProps.movie.latest_quality_transition &&

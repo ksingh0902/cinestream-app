@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { ContentCard } from '../ContentCard';
 import { DiscoveryRow } from '../DiscoveryRow';
 import { BrowseByYear } from '../BrowseByYear';
@@ -16,6 +16,15 @@ vi.mock('../../../features/watchlist', () => ({
     removeItem: vi.fn(),
   }),
 }));
+
+const mockResolvePosterFallback = vi.fn().mockResolvedValue(null);
+vi.mock('../../../api/catalogue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/catalogue')>();
+  return {
+    ...actual,
+    resolvePosterFallback: (...args: any[]) => mockResolvePosterFallback(...args),
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -58,6 +67,7 @@ describe('Discovery Components & Badging', () => {
   it('2. ContentCard hides upgrade badge when neither movie nor prop provides it', () => {
     const movieWithoutBadge: MovieItem = {
       ...mockMovie,
+      is_hindi_dubbed: true,
       upgradeBadge: undefined,
       latest_quality_transition: undefined,
     };
@@ -70,13 +80,14 @@ describe('Discovery Components & Badging', () => {
 
     const badge = container.querySelector('.card-badge-upgrade');
     expect(badge).toBeNull();
+    expect(container.querySelector('.badge-tag.dubbed')).toBeNull();
   });
 
   it('3. DiscoveryRow renders items and triggers onSeeAll', () => {
     const handleSeeAll = vi.fn();
     const handleSelectMovie = vi.fn();
 
-    render(
+    const { container } = render(
       <DiscoveryRow
         id="recently-added"
         title="Recently Added"
@@ -88,6 +99,7 @@ describe('Discovery Components & Badging', () => {
     );
 
     expect(screen.getByText('Recently Added')).toBeDefined();
+    expect(container.querySelector('.discovery-count-badge')).toBeNull();
     expect(screen.getByText('Gladiator II')).toBeDefined();
 
     const seeAllBtn = screen.getByText('See All');
@@ -231,5 +243,179 @@ describe('Discovery Components & Badging', () => {
     expect(screen.getByRole('heading', { name: 'Gladiator II' })).toBeDefined();
 
     vi.useRealTimers();
+  });
+
+  it('9. Trending Now and Recommended for You DiscoveryRows render titles cleanly', () => {
+    const onSelect = vi.fn();
+    render(
+      <>
+        <DiscoveryRow
+          id="section-trending-now"
+          title="Trending Now"
+          count={1}
+          items={[mockMovie]}
+          onSelectMovie={onSelect}
+        />
+        <DiscoveryRow
+          id="section-recommended-for-you"
+          title="Recommended for You"
+          count={1}
+          items={[{ ...mockMovie, id: 202, title: 'Inception' }]}
+          onSelectMovie={onSelect}
+        />
+      </>
+    );
+
+    expect(screen.getByText('Trending Now')).toBeDefined();
+    expect(screen.getByText('Recommended for You')).toBeDefined();
+    expect(screen.getByText('Gladiator II')).toBeDefined();
+    expect(screen.getByText('Inception')).toBeDefined();
+  });
+
+  it('10. ContentCard poster lifecycle: valid poster transitions loading -> loaded', () => {
+    const { container } = render(<ContentCard movie={mockMovie} onSelect={vi.fn()} />);
+    const wrap = container.querySelector('.card-poster-wrap')!;
+    const img = container.querySelector('.card-poster-img') as HTMLImageElement;
+
+    expect(wrap.getAttribute('data-poster-state')).toBe('loading');
+    expect(img.getAttribute('src')).toBe('https://example.com/poster.jpg');
+    expect(img.getAttribute('loading')).toBe('lazy');
+
+    fireEvent.load(img);
+    expect(wrap.getAttribute('data-poster-state')).toBe('loaded');
+    expect(img.getAttribute('src')).toBe('https://example.com/poster.jpg');
+  });
+
+  it('11. ContentCard poster recovery: 404 primary poster falls back to mirror poster_fallbacks and loads', () => {
+    const movieWithFallback: MovieItem = {
+      ...mockMovie,
+      id: 11030,
+      title: 'Spider-Man: Across the Spider-Verse (2023)',
+      poster: 'https://m.media-amazon.com/images/M/broken-404.jpg',
+      poster_fallbacks: ['https://image.tmdb.org/t/p/w500/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg'],
+    };
+    const { container } = render(<ContentCard movie={movieWithFallback} onSelect={vi.fn()} />);
+    const wrap = container.querySelector('.card-poster-wrap')!;
+    const img = container.querySelector('.card-poster-img') as HTMLImageElement;
+
+    expect(img.getAttribute('src')).toBe('https://m.media-amazon.com/images/M/broken-404.jpg');
+    expect(wrap.getAttribute('data-poster-state')).toBe('loading');
+
+    fireEvent.error(img);
+    expect(img.getAttribute('src')).toBe('https://image.tmdb.org/t/p/w500/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg');
+    expect(wrap.getAttribute('data-poster-state')).toBe('loading');
+
+    fireEvent.load(img);
+    expect(wrap.getAttribute('data-poster-state')).toBe('loaded');
+  });
+
+  it('12. ContentCard permanent poster failure terminates loading and renders SVG fallback without looping', async () => {
+    mockResolvePosterFallback.mockResolvedValueOnce(null);
+    const brokenMovie: MovieItem = {
+      ...mockMovie,
+      id: 99999,
+      poster: 'https://example.com/404.jpg',
+      poster_fallbacks: [],
+    };
+    const { container } = render(<ContentCard movie={brokenMovie} onSelect={vi.fn()} />);
+    const wrap = container.querySelector('.card-poster-wrap')!;
+    const img = container.querySelector('.card-poster-img') as HTMLImageElement;
+
+    fireEvent.error(img);
+    await waitFor(() => {
+      expect(wrap.getAttribute('data-poster-state')).toBe('error');
+    });
+    expect(img.getAttribute('src')).toContain('data:image/svg+xml');
+
+    // Subsequent error must not re-enter loading state
+    fireEvent.error(img);
+    expect(wrap.getAttribute('data-poster-state')).toBe('error');
+  });
+
+  it('13. ContentCard resets poster state cleanly when poster URL prop changes', async () => {
+    mockResolvePosterFallback.mockResolvedValueOnce(null);
+    const movieA: MovieItem = { ...mockMovie, poster: 'https://example.com/a-broken.jpg' };
+    const movieB: MovieItem = { ...mockMovie, poster: 'https://example.com/b-valid.jpg' };
+
+    const { container, rerender } = render(<ContentCard movie={movieA} onSelect={vi.fn()} />);
+    const wrap = container.querySelector('.card-poster-wrap')!;
+    const img = container.querySelector('.card-poster-img') as HTMLImageElement;
+
+    fireEvent.error(img);
+    await waitFor(() => {
+      expect(wrap.getAttribute('data-poster-state')).toBe('error');
+    });
+
+    rerender(<ContentCard movie={movieB} onSelect={vi.fn()} />);
+    expect(wrap.getAttribute('data-poster-state')).toBe('loading');
+    expect(img.getAttribute('src')).toBe('https://example.com/b-valid.jpg');
+
+    fireEvent.load(img);
+    expect(wrap.getAttribute('data-poster-state')).toBe('loaded');
+  });
+
+  it('14. Multiple ContentCards isolate poster errors from neighbouring cards', async () => {
+    mockResolvePosterFallback.mockResolvedValueOnce(null);
+    const brokenCard: MovieItem = { ...mockMovie, id: 501, title: 'Broken Card', poster: 'https://example.com/dead.jpg' };
+    const healthyCard: MovieItem = { ...mockMovie, id: 502, title: 'Healthy Card', poster: 'https://example.com/ok.jpg' };
+
+    const { container } = render(
+      <>
+        <ContentCard movie={brokenCard} onSelect={vi.fn()} />
+        <ContentCard movie={healthyCard} onSelect={vi.fn()} />
+      </>
+    );
+
+    const wraps = container.querySelectorAll('.card-poster-wrap');
+    const imgs = container.querySelectorAll('.card-poster-img');
+
+    fireEvent.error(imgs[0]);
+    fireEvent.load(imgs[1]);
+
+    await waitFor(() => {
+      expect(wraps[0].getAttribute('data-poster-state')).toBe('error');
+    });
+    expect(wraps[1].getAttribute('data-poster-state')).toBe('loaded');
+    expect(imgs[1].getAttribute('src')).toBe('https://example.com/ok.jpg');
+  });
+
+  it('15. Evergreen Picks DiscoveryRow renders up to 50 cards with Evergreen Picks heading', () => {
+    const fiftyItems: MovieItem[] = Array.from({ length: 50 }, (_, idx) => ({
+      ...mockMovie,
+      id: 1000 + idx,
+      title: `Evergreen Title ${idx + 1}`,
+    }));
+    const { container } = render(
+      <DiscoveryRow
+        id="section-recommended-for-you"
+        title="Evergreen Picks"
+        items={fiftyItems}
+        onSelectMovie={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Evergreen Picks')).toBeDefined();
+    expect(container.querySelectorAll('.content-card').length).toBe(50);
+  });
+
+  it('16. ContentCard recovers dead poster with no DB mirrors via bounded on-demand resolvePosterFallback', async () => {
+    mockResolvePosterFallback.mockResolvedValueOnce('https://image.tmdb.org/t/p/w500/mastaney-live.jpg');
+    const punjabiMovie: MovieItem = {
+      ...mockMovie,
+      id: 3492,
+      title: 'Mastaney (2023) Punjabi',
+      year: '2023',
+      poster: 'https://m.media-amazon.com/images/M/dead-404.jpg',
+      poster_fallbacks: [],
+    };
+    const { container } = render(<ContentCard movie={punjabiMovie} onSelect={vi.fn()} />);
+    const wrap = container.querySelector('.card-poster-wrap')!;
+    const img = container.querySelector('.card-poster-img') as HTMLImageElement;
+
+    fireEvent.error(img);
+    await waitFor(() => {
+      expect(img.getAttribute('src')).toBe('https://image.tmdb.org/t/p/w500/mastaney-live.jpg');
+    });
+    fireEvent.load(img);
+    expect(wrap.getAttribute('data-poster-state')).toBe('loaded');
   });
 });

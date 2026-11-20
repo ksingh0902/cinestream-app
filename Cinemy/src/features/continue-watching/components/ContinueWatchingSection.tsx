@@ -31,7 +31,6 @@ export const ContinueWatchingSection: React.FC<ContinueWatchingSectionProps> = (
       <div className="cw-header">
         <div className="cw-title-group">
           <h2 className="cw-heading">Continue Watching</h2>
-          <span className="cw-count-badge">{count}</span>
         </div>
         <button
           type="button"
