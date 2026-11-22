@@ -244,3 +244,142 @@ describe('Workstream A & B: Cross-Platform Discovery Consistency + Independent L
     fetchSpy.mockRestore();
   });
 });
+
+describe('Recently Added: 5x15 See-All Grid + Source Priority Pagination', () => {
+  const makeBatch = (startId: number, count: number) =>
+    Array.from({ length: count }, (_, idx) => {
+      const id = startId + idx;
+      const src = id <= 10 ? 'yomovies' : idx % 2 === 0 ? 'dooflix' : 'ask4movie';
+      return {
+        ...mockMovie(id, `Recently Added Title ${id}`),
+        source: src,
+      };
+    });
+
+  it('1. Homepage Recently Added remains a limited horizontal row (limit=30), while See All loads 75 items in a 5-column grid and Load More appends the next 75', async () => {
+    const page1Items = makeBatch(1, 75);
+    const page2Items = makeBatch(76, 75);
+
+    mockGetMovies.mockImplementation(({ sort, page, series }: { sort?: string; page?: number; series?: number }) => {
+      if (sort === 'first_added') {
+        if (page === 1) {
+          return Promise.resolve({
+            items: page1Items,
+            total: 150,
+            page: 1,
+            per_page: 75,
+            has_more: true,
+          });
+        }
+        return Promise.resolve({
+          items: page2Items,
+          total: 150,
+          page: 2,
+          per_page: 75,
+          has_more: false,
+        });
+      }
+      return Promise.resolve({
+        items: [mockMovie(series ? 2000 : 1000, series ? 'Sample Series' : 'Sample Movie', series ? 1 : 0)],
+        total: 1,
+        page: 1,
+        per_page: 80,
+        has_more: false,
+      });
+    });
+
+    const { container } = render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    // Homepage Recently Added stays a limited horizontal row
+    await waitFor(() => {
+      expect(mockGetRecentlyAdded).toHaveBeenCalledWith({
+        limit: 30,
+        window_months: 3,
+        latest_crawl: true,
+      });
+    });
+    expect(container.querySelector('#section-recently-added .discovery-row-track')).not.toBeNull();
+
+    // Open Recently Added -> See All
+    const seeAllBtn = screen.getByRole('button', { name: 'See All for Recently Added' });
+    fireEvent.click(seeAllBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recently Added to CINEMY')).toBeDefined();
+      expect(container.querySelectorAll('.content-grid--five-col .content-card').length).toBe(75);
+    });
+
+    const gridEl = container.querySelector('.content-grid--five-col');
+    expect(gridEl?.getAttribute('data-columns')).toBe('5');
+    expect(mockGetMovies).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, per_page: 75, sort: 'first_added' })
+    );
+
+    // Click Load More -> requests page 2 (per_page=75) and appends without replacing page 1
+    const loadMoreBtn = screen.getByRole('button', { name: 'Load more movies and series' });
+    fireEvent.click(loadMoreBtn);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.content-grid--five-col .content-card').length).toBe(150);
+    });
+
+    expect(mockGetMovies).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 2, per_page: 75, sort: 'first_added' })
+    );
+    // Page 1 must NOT have been re-fetched when loading page 2
+    const firstAddedPage1Calls = mockGetMovies.mock.calls.filter(
+      ([arg]) => arg?.sort === 'first_added' && arg?.page === 1
+    );
+    expect(firstAddedPage1Calls.length).toBe(1);
+
+    // Load More disappears when has_more is false
+    expect(screen.queryByRole('button', { name: 'Load more movies and series' })).toBeNull();
+    expect(screen.getByText(/You have viewed all 150 available titles/i)).toBeDefined();
+  });
+
+  it('2. Exactly 75 items with has_more=false renders all 75 cards and hides Load More', async () => {
+    const exact75 = makeBatch(1, 75);
+    mockGetMovies.mockImplementation(({ sort, series }: { sort?: string; series?: number }) => {
+      if (sort === 'first_added') {
+        return Promise.resolve({
+          items: exact75,
+          total: 75,
+          page: 1,
+          per_page: 75,
+          has_more: false,
+        });
+      }
+      return Promise.resolve({
+        items: [mockMovie(series ? 2000 : 1000, series ? 'Sample Series' : 'Sample Movie', series ? 1 : 0)],
+        total: 1,
+        page: 1,
+        per_page: 80,
+        has_more: false,
+      });
+    });
+
+    const { container } = render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'See All for Recently Added' })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'See All for Recently Added' }));
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.content-grid--five-col .content-card').length).toBe(75);
+    });
+    expect(screen.queryByRole('button', { name: 'Load more movies and series' })).toBeNull();
+  });
+});

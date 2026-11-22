@@ -249,8 +249,13 @@ def sync_yomovies(
     elif base_url:
         target_bases = [base_url.rstrip("/")]
     else:
-        # Default to PRmovies (original/parent mirror) and Yomovies active mirror
-        target_bases = ["https://prmovies.ventures", "https://yomovies.com.im"]
+        # Default to active PRMovies & YoMovies mirrors (same catalogue; either healthy mirror succeeds)
+        target_bases = []
+        for candidate in ["https://prmovies.style", "https://yomovies.irish", *SITE_MIRRORS]:
+            c_clean = candidate.strip().rstrip("/")
+            if c_clean and c_clean not in target_bases:
+                target_bases.append(c_clean)
+        target_bases = target_bases[:4]
 
     http = HttpClient(delay=0.1, cache_dir=".cache")
 

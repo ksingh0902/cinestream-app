@@ -17,6 +17,7 @@ interface ContentGridProps {
   onChangeFilter?: (key: keyof CatalogFilterState, value: string) => void;
   onClearFilters?: () => void;
   isUpgradeView?: boolean;
+  fiveColumnLayout?: boolean;
 }
 
 export const ContentGrid: React.FC<ContentGridProps> = ({
@@ -32,6 +33,7 @@ export const ContentGrid: React.FC<ContentGridProps> = ({
   onChangeFilter,
   onClearFilters,
   isUpgradeView = false,
+  fiveColumnLayout = false,
 }) => {
   return (
     <section className="catalogue-section" aria-label={title}>
@@ -80,7 +82,10 @@ export const ContentGrid: React.FC<ContentGridProps> = ({
       ) : (
         <>
           {/* Multi-Row Responsive Grid */}
-          <div className="content-grid">
+          <div
+            className={fiveColumnLayout ? 'content-grid content-grid--five-col' : 'content-grid'}
+            data-columns={fiveColumnLayout ? '5' : undefined}
+          >
             {movies.map((movie) => (
               <ContentCard
                 key={movie.id}

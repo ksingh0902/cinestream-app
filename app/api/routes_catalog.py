@@ -402,6 +402,82 @@ def _group_ordered_editions(items: list[dict]) -> list[dict]:
     return grouped
 
 
+def _recently_added_year_int(item: dict) -> int:
+    raw = str(item.get("year") or "").strip()
+    if raw.isdigit() and len(raw) == 4:
+        return int(raw)
+    return 0
+
+
+def _recently_added_rank_key(item: dict) -> tuple[int, int, int]:
+    """Existing Recently Added ranking within a source: verified release year DESC, first_added_at DESC, id DESC."""
+    ts = int(item.get("first_added_at") or item.get("updated_at") or 0)
+    return (-_recently_added_year_int(item), -ts, -int(item.get("id") or 0))
+
+
+def _apply_recently_added_source_priority(items: list[dict], yomovies_slots: int = 10) -> list[dict]:
+    """
+    Canonical-title deduplication + source priority for Recently Added:
+    - Deduplicate by canonical normalized title (preferring yomovies when a title exists on multiple sources).
+    - Positions 1..yomovies_slots (default 10): eligible titles whose canonical source is 'yomovies',
+      ordered by existing Recently Added ranking (release year DESC, first_added_at DESC, id DESC).
+    - Positions 11+: eligible titles from other sources (dooflix, ask4movie, movies7, etc.) interleaved
+      by existing per-source Recently Added ranking, followed by any remaining yomovies titles if other
+      sources are exhausted.
+    - If fewer than 10 eligible yomovies titles exist, fills remaining slots from other sources with no gaps.
+    """
+    groups: dict[str, list[dict]] = {}
+    for item in items:
+        nt = _normalized_title(item.get("title"))
+        key = nt if nt else f"id:{item.get('id')}"
+        groups.setdefault(key, []).append(item)
+
+    canonical_items: list[dict] = []
+    for candidates in groups.values():
+        candidates.sort(
+            key=lambda row: (
+                _source_priority((row.get("source") or "").lower()),
+                _recently_added_rank_key(row),
+            )
+        )
+        primary = candidates[0]
+        primary["audio_edition"] = _audio_edition(primary)
+        primary["available_source_count"] = len({(row.get("source") or "").lower() for row in candidates if row.get("source")})
+        canonical_items.append(primary)
+
+    yomovies_items = [
+        item for item in canonical_items if (item.get("source") or "").lower() == "yomovies"
+    ]
+    yomovies_items.sort(key=_recently_added_rank_key)
+
+    other_by_source: dict[str, list[dict]] = {}
+    for item in canonical_items:
+        src = (item.get("source") or "").lower()
+        if src == "yomovies":
+            continue
+        other_by_source.setdefault(src, []).append(item)
+
+    for src_items in other_by_source.values():
+        src_items.sort(key=_recently_added_rank_key)
+
+    ordered_other_sources = sorted(
+        other_by_source.keys(),
+        key=lambda s: (_source_priority(s), s),
+    )
+    interleaved_others: list[dict] = []
+    if ordered_other_sources:
+        max_len = max(len(other_by_source[s]) for s in ordered_other_sources)
+        for idx in range(max_len):
+            for src in ordered_other_sources:
+                bucket = other_by_source[src]
+                if idx < len(bucket):
+                    interleaved_others.append(bucket[idx])
+
+    top_yomovies = yomovies_items[:yomovies_slots]
+    remaining_yomovies = yomovies_items[yomovies_slots:]
+    return top_yomovies + interleaved_others + remaining_yomovies
+
+
 @router.get("/api/sources")
 def sources():
     """R12: Report each adapter's status, items count, and player kind."""
@@ -764,7 +840,11 @@ def movies(
 
     # Do not materialise a 30k+ row result just to render the first page.  The
     # extra room preserves source/edition grouping while keeping VM work bounded.
-    candidate_limit = min(1000, max(192, page * per_page * 8))
+    is_recently_added_sort = sort in ("first_added", "newest_added") and not q_str
+    if is_recently_added_sort:
+        candidate_limit = min(4000, max(1200, page * per_page * 6))
+    else:
+        candidate_limit = min(1000, max(192, page * per_page * 8))
     query_sql += " LIMIT ?"
     query_args = list(query_args) + [candidate_limit]
 
@@ -789,13 +869,16 @@ def movies(
                 if d.get("source") == "movies7" and is_movie_available_on_primary_sources(d.get("title"), d.get("year")):
                     continue
                 formatted.append(_format_row(d))
-            items_list = _group_ordered_editions(formatted)
+            if is_recently_added_sort:
+                items_list = _apply_recently_added_source_priority(formatted, yomovies_slots=10)
+            else:
+                items_list = _group_ordered_editions(formatted)
 
     offset = (page - 1) * per_page
+    exhausted = len(raw_rows) < candidate_limit
     result = {
-        # The count is before source/edition de-duplication; clients should use
-        # has_more for infinite scrolling.
-        "total": raw_total,
+        # Exact canonical count when all rows were evaluated; otherwise raw_total.
+        "total": len(items_list) if exhausted else raw_total,
         "page": page,
         "per_page": per_page,
         "items": items_list[offset:offset + per_page],
@@ -833,9 +916,10 @@ def recently_added(
     When latest_crawl=True, restricts to the most recent crawler run (24h around latest timestamp).
     Sorted newest first using original first_added_at, de-duplicated by title.
     """
-    limit = min(60, max(1, int(limit)))
+    limit = min(100, max(1, int(limit)))
     window = max(1, min(24, int(window_months)))
-    cutoff_ts = int(time.time()) - (window * 30 * 86400)
+    window_cutoff_ts = int(time.time()) - (window * 30 * 86400)
+    cutoff_ts = window_cutoff_ts
 
     if latest_crawl:
         with get_db_connection() as conn:
@@ -843,17 +927,19 @@ def recently_added(
         if max_ts > 0:
             cutoff_ts = max(cutoff_ts, int(max_ts) - 86400)
 
-    where = [
+    base_where = [
         "title IS NOT NULL AND title != ''",
         f"({ADULT_EXCLUSION_SQL})",
         "(COALESCE(poster, poster_url, '') != '' AND poster NOT LIKE '%logo.png%')",
-        "COALESCE(first_added_at, updated_at, 0) >= ?",
     ]
-    args: list = [cutoff_ts]
+    base_args: list = []
 
     if series is not None:
-        where.append("is_series = ?")
-        args.append(series)
+        base_where.append("is_series = ?")
+        base_args.append(series)
+
+    where = list(base_where) + ["COALESCE(first_added_at, updated_at, 0) >= ?"]
+    args: list = list(base_args) + [cutoff_ts]
 
     where_clause = " AND ".join(where)
     query_sql = f"""
@@ -880,21 +966,44 @@ def recently_added(
             END ASC
         LIMIT ?
     """
+    fetch_limit = max(160, limit * 4)
     with get_db_connection() as conn:
-        raw_rows = conn.execute(query_sql, args + [limit * 3]).fetchall()
-        formatted = []
-        seen_titles = set()
+        raw_rows = conn.execute(query_sql, args + [fetch_limit]).fetchall()
+        candidates = []
         for r in raw_rows:
             d = dict(r)
             if d.get("source") == "movies7" and is_movie_available_on_primary_sources(d.get("title"), d.get("year")):
                 continue
-            nt = _normalized_title(d.get("title"))
-            if nt in seen_titles:
-                continue
-            seen_titles.add(nt)
-            formatted.append(_format_row(d))
-            if len(formatted) >= limit:
-                break
+            candidates.append(_format_row(d))
+
+        # When latest_crawl=True and the most recent 24h crawl had zero new yomovies titles,
+        # top up the 10 YoMovies priority slots from YoMovies' most recent crawl within window_months.
+        if latest_crawl and cutoff_ts > window_cutoff_ts:
+            ym_count = sum(1 for c in candidates if (c.get("source") or "").lower() == "yomovies")
+            if ym_count == 0:
+                ym_where = list(base_where) + [
+                    "source = 'yomovies'",
+                    "COALESCE(first_added_at, updated_at, 0) >= ?",
+                ]
+                ym_sql = f"""
+                    SELECT * FROM movies
+                    WHERE {' AND '.join(ym_where)}
+                    ORDER BY
+                        CAST(COALESCE(NULLIF(year, ''), '0') AS INT) DESC,
+                        COALESCE(first_added_at, updated_at, 0) DESC,
+                        id DESC
+                    LIMIT 10
+                """
+                ym_rows = conn.execute(ym_sql, list(base_args) + [window_cutoff_ts]).fetchall()
+                existing_ids = {c.get("id") for c in candidates}
+                for r in ym_rows:
+                    d = dict(r)
+                    if d.get("id") not in existing_ids:
+                        candidates.append(_format_row(d))
+                        existing_ids.add(d.get("id"))
+
+    prioritized = _apply_recently_added_source_priority(candidates, yomovies_slots=10)
+    formatted = prioritized[:limit]
 
     return {
         "total": len(formatted),

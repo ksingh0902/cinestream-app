@@ -31,6 +31,8 @@ class StreamResolver:
             candidates.append(default_candidate)
 
         referers = [
+            "https://prmovies.style/",
+            "https://yomovies.irish/",
             "https://prmovies.ventures/",
             "https://yomovies.com.im/",
             "https://speedostream1.com/",

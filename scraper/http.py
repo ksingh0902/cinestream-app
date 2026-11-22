@@ -167,8 +167,8 @@ class HttpClient:
 
         if text is None:
             if any(dom in url for dom in (
-                "yomovies.", "yomovies.wine", "yomovies.exchange", "yomovies.com.im",
-                "prmovies.", "prmovies.ventures", "prmovies.mba", "prmovies.technology"
+                "yomovies.", "yomovies.irish", "yomovies.wine", "yomovies.exchange", "yomovies.com.im",
+                "prmovies.", "prmovies.style", "prmovies.ventures", "prmovies.mba", "prmovies.technology"
             )):
                 text = self._browser_get(url)
             else:

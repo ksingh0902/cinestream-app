@@ -87,6 +87,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   });
 
   // Filtered catalogue grid state (for category tabs, search, filters, or See All)
+  const RECENTLY_ADDED_SEE_ALL_PAGE_SIZE = 75;
+  const DEFAULT_GRID_PAGE_SIZE = 36;
   const [catalogMovies, setCatalogMovies] = useState<MovieItem[]>([]);
   const [totalCatalogCount, setTotalCatalogCount] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -402,16 +404,19 @@ export const HomePage: React.FC<HomePageProps> = ({
             : undefined;
 
         const effectiveGenre = filters.genre || activeCategory.genre;
+        const effectiveSort = (filters.sort as any) || preferences.default_sort || 'recent';
+        const isRecentlyAddedGrid = effectiveSort === 'first_added' || effectiveSort === 'newest_added';
+        const pageSize = isRecentlyAddedGrid ? RECENTLY_ADDED_SEE_ALL_PAGE_SIZE : DEFAULT_GRID_PAGE_SIZE;
 
         const res = await getMovies({
           page: pageToFetch,
-          per_page: 36,
+          per_page: pageSize,
           series: seriesParam,
           genre: effectiveGenre,
           year: filters.year,
           quality: filters.quality,
           language: filters.language,
-          sort: (filters.sort as any) || preferences.default_sort || 'recent',
+          sort: effectiveSort,
         });
 
         const newItems = res.items || [];
@@ -808,6 +813,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   onChangeFilter={handleChangeFilter}
                   onClearFilters={handleClearFilters}
                   isUpgradeView={filters.sort === 'recently_upgraded'}
+                  fiveColumnLayout={filters.sort === 'first_added' || filters.sort === 'newest_added'}
                 />
 
                 {paginationError && (

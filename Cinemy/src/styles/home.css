@@ -985,6 +985,14 @@
   }
 }
 
+/* Recently Added See All: 5 columns x 15 rows (75 items per page) on desktop viewports */
+@media (min-width: 1080px) {
+  .content-grid.content-grid--five-col {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 18px;
+  }
+}
+
 /* --------------------------------------------------------------------------
    Content Card Component
    -------------------------------------------------------------------------- */

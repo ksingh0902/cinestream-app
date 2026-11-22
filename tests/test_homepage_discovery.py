@@ -404,5 +404,195 @@ class TestHomepageDiscovery(unittest.TestCase):
         self.assertNotIn("Stale Crawl Title", titles)
 
 
+class TestRecentlyAddedSourcePriorityAndPagination(unittest.TestCase):
+    """Tests for Recently Added YoMovies first-10 source priority, deduplication, and 75-item pagination."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="cinemy_ra_test_")
+        self.db_path = os.path.join(self.temp_dir, "test_ra.db")
+        self._prev_db_path = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = self.db_path
+
+        con = connect(self.db_path)
+        con.close()
+        migrate_database(self.db_path)
+
+        from app.api.routes_catalog import invalidate_catalog_cache
+        invalidate_catalog_cache()
+
+        self.app = FastAPI()
+        self.app.include_router(catalog_router)
+        self.client = TestClient(self.app)
+
+    def tearDown(self):
+        from app.api.routes_catalog import invalidate_catalog_cache
+        invalidate_catalog_cache()
+        if self._prev_db_path is not None:
+            os.environ["DB_PATH"] = self._prev_db_path
+        elif "DB_PATH" in os.environ:
+            del os.environ["DB_PATH"]
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _seed_item(self, con, idx: int, source: str, title: str, year: str = "2026", first_added_at: int | None = None):
+        ts = first_added_at if first_added_at is not None else int(time.time()) - idx
+        url = f"https://example.com/{source}/item-{idx}"
+        upsert(con, {
+            "url": url,
+            "title": title,
+            "year": year,
+            "quality": "1080p",
+            "is_series": 0,
+            "source": source,
+            "poster": f"https://example.com/poster-{idx}.jpg",
+        })
+        con.execute(
+            "UPDATE movies SET source = ?, first_added_at = ?, updated_at = ? WHERE url = ?",
+            (source, ts, ts, url),
+        )
+
+    def test_source_priority_first_10_yomovies_and_remaining_other_sources(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        for i in range(15):
+            self._seed_item(con, i, "yomovies", f"YoMovies Title {i:02d}", year="2026", first_added_at=now - i)
+        # Add an unknown-year YoMovies item with newer timestamp: must NOT outrank 2026 releases
+        self._seed_item(con, 99, "yomovies", "Unknown Year YoTitle", year="", first_added_at=now + 500)
+        for i in range(20):
+            src = ["dooflix", "ask4movie", "movies7"][i % 3]
+            self._seed_item(con, 200 + i, src, f"Other Source Title {i:02d}", year="2026", first_added_at=now - i)
+        con.commit()
+        con.close()
+
+        # Check /api/movies?sort=first_added&page=1&per_page=75
+        resp = self.client.get("/api/movies?sort=first_added&page=1&per_page=75")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()["items"]
+        self.assertEqual(len(items), 36)
+
+        first_10 = items[:10]
+        self.assertTrue(all(it["source"] == "yomovies" for it in first_10))
+        self.assertNotIn("Unknown Year YoTitle", [it["title"] for it in first_10])
+
+        # Positions 11..30 must come from other sources before remaining yomovies
+        positions_11_to_30 = items[10:30]
+        self.assertTrue(all(it["source"] != "yomovies" for it in positions_11_to_30))
+        self.assertIn("dooflix", {it["source"] for it in positions_11_to_30})
+        self.assertIn("ask4movie", {it["source"] for it in positions_11_to_30})
+
+        # Also check /api/catalog/recently-added
+        ra_resp = self.client.get("/api/catalog/recently-added?limit=30&window_months=3")
+        self.assertEqual(ra_resp.status_code, 200)
+        ra_items = ra_resp.json()["items"]
+        self.assertEqual(len(ra_items), 30)
+        self.assertTrue(all(it["source"] == "yomovies" for it in ra_items[:10]))
+        self.assertTrue(any(it["source"] != "yomovies" for it in ra_items[10:]))
+
+    def test_fewer_than_10_yomovies_fills_from_other_sources_without_gaps(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        for i in range(4):
+            self._seed_item(con, i, "yomovies", f"Yo Short {i}", year="2026", first_added_at=now - i)
+        for i in range(12):
+            src = "dooflix" if i % 2 == 0 else "ask4movie"
+            self._seed_item(con, 100 + i, src, f"Other Fill {i}", year="2026", first_added_at=now - i)
+        con.commit()
+        con.close()
+
+        resp = self.client.get("/api/movies?sort=first_added&page=1&per_page=75")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        items = data["items"]
+        self.assertEqual(len(items), 16)
+        self.assertFalse(data["has_more"])
+        self.assertTrue(all(it["source"] == "yomovies" for it in items[:4]))
+        self.assertTrue(all(it["source"] != "yomovies" for it in items[4:]))
+
+    def test_canonical_deduplication_across_yomovies_and_other_sources(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        self._seed_item(con, 1, "yomovies", "Shared Blockbuster (2026)", year="2026", first_added_at=now)
+        self._seed_item(con, 2, "dooflix", "Shared Blockbuster [2026] Hindi Dubbed", year="2026", first_added_at=now + 10)
+        self._seed_item(con, 3, "ask4movie", "Shared Blockbuster", year="2026", first_added_at=now + 20)
+        self._seed_item(con, 4, "dooflix", "Unique DooFlix Film", year="2026", first_added_at=now - 5)
+        con.commit()
+        con.close()
+
+        resp = self.client.get("/api/movies?sort=first_added&page=1&per_page=75")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()["items"]
+        shared = [it for it in items if "Shared Blockbuster" in it["title"]]
+        self.assertEqual(len(shared), 1)
+        self.assertEqual(shared[0]["source"], "yomovies")
+        self.assertEqual(len(items), 2)
+
+    def test_pagination_75_per_page_multi_page_and_exact_75_boundary(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        # Seed 15 YoMovies + 145 other-source titles = 160 total unique titles
+        for i in range(15):
+            self._seed_item(con, i, "yomovies", f"Paginated Yo {i:03d}", year="2026", first_added_at=now - i)
+        for i in range(145):
+            src = "dooflix" if i % 2 == 0 else "ask4movie"
+            self._seed_item(con, 500 + i, src, f"Paginated Other {i:03d}", year="2026", first_added_at=now - i)
+        con.commit()
+        con.close()
+
+        p1 = self.client.get("/api/movies?sort=first_added&page=1&per_page=75").json()
+        p2 = self.client.get("/api/movies?sort=first_added&page=2&per_page=75").json()
+        p3 = self.client.get("/api/movies?sort=first_added&page=3&per_page=75").json()
+
+        self.assertEqual(len(p1["items"]), 75)
+        self.assertTrue(p1["has_more"])
+        self.assertTrue(all(it["source"] == "yomovies" for it in p1["items"][:10]))
+        self.assertTrue(all(it["source"] != "yomovies" for it in p1["items"][10:]))
+
+        self.assertEqual(len(p2["items"]), 75)
+        self.assertTrue(p2["has_more"])
+
+        self.assertEqual(len(p3["items"]), 10)
+        self.assertFalse(p3["has_more"])
+
+        all_ids = [it["id"] for it in (p1["items"] + p2["items"] + p3["items"])]
+        self.assertEqual(len(all_ids), 160)
+        self.assertEqual(len(set(all_ids)), 160)
+
+    def test_exactly_75_titles_hides_has_more(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        for i in range(10):
+            self._seed_item(con, i, "yomovies", f"Exact75 Yo {i:02d}", year="2026", first_added_at=now - i)
+        for i in range(65):
+            self._seed_item(con, 200 + i, "dooflix", f"Exact75 Other {i:02d}", year="2026", first_added_at=now - i)
+        con.commit()
+        con.close()
+
+        p1 = self.client.get("/api/movies?sort=first_added&page=1&per_page=75").json()
+        self.assertEqual(len(p1["items"]), 75)
+        self.assertEqual(p1["total"], 75)
+        self.assertFalse(p1["has_more"])
+
+    def test_latest_crawl_still_prioritizes_first_10_yomovies_when_latest_24h_had_only_other_sources(self):
+        con = connect(self.db_path)
+        now = int(time.time())
+        five_days_ago = now - (5 * 86400)
+        # 12 YoMovies titles from 5 days ago (within 3-month window)
+        for i in range(12):
+            self._seed_item(con, i, "yomovies", f"Recent Yo {i:02d}", year="2026", first_added_at=five_days_ago - i)
+        # 15 ask4movie/movies7 titles from today's crawl
+        for i in range(15):
+            src = "ask4movie" if i % 2 == 0 else "movies7"
+            self._seed_item(con, 300 + i, src, f"Today Crawl {i:02d}", year="2026", first_added_at=now - i)
+        con.commit()
+        con.close()
+
+        resp = self.client.get("/api/catalog/recently-added?limit=30&window_months=3&latest_crawl=true")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()["items"]
+        self.assertEqual(len(items), 25)
+        self.assertTrue(all(it["source"] == "yomovies" for it in items[:10]))
+        self.assertTrue(all(it["source"] != "yomovies" for it in items[10:]))
+
+
 if __name__ == "__main__":
     unittest.main()
