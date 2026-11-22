@@ -155,15 +155,14 @@ class HttpClient:
             time.sleep(self.delay - gap)
 
         text = None
-        # Try fast requests first if cookies are established
-        if self.s.cookies:
-            try:
-                r = self.s.get(url, headers=headers_for(url, referer), timeout=req_timeout)
-                if r.status_code == 200 and "Just a moment" not in r.text:
-                    r.encoding = r.apparent_encoding or "utf-8"
-                    text = r.text
-            except Exception:
-                text = None
+        # Always try fast direct HTTP first; only fall back to browser if blocked or challenged.
+        try:
+            r = self.s.get(url, headers=headers_for(url, referer), timeout=req_timeout)
+            if r.status_code == 200 and "Just a moment" not in r.text:
+                r.encoding = r.apparent_encoding or "utf-8"
+                text = r.text
+        except Exception:
+            text = None
 
         if text is None:
             if any(dom in url for dom in (
