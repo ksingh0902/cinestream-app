@@ -27,6 +27,7 @@ import {
 } from '../services/playerService';
 import { useHlsPlayer } from '../hooks/useHlsPlayer';
 import { usePlaybackProgress } from '../hooks/usePlaybackProgress';
+import { useTvRemote } from '../../tv-remote';
 
 interface PlayerModalProps {
   isOpen: boolean;
@@ -78,6 +79,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
   onClose,
 }) => {
   const { username, role, authenticated } = useAuth();
+  const { registerPlayerCommandHandler, publishTvPlaybackState } = useTvRemote();
   const scopedKey = resolveContinueWatchingKey(username, role, authenticated);
   const scopedKeyRef = useRef(scopedKey);
   scopedKeyRef.current = scopedKey;
@@ -846,6 +848,191 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
     },
     [nextEpPopup, activeSeasonNum, activeEpisodeNum, showHud, dismissNextEpisodePopup, handleSelectEpisode]
   );
+
+  // TV Remote integration (Phases 2 & 4): non-invasive command receiver + authoritative state publisher
+  useEffect(() => {
+    if (!isOpen) {
+      registerPlayerCommandHandler(null);
+      publishTvPlaybackState(
+        {
+          status: 'IDLE',
+          mediaId: null,
+          currentTitle: null,
+          currentEpisode: null,
+          currentPosition: 0,
+          duration: 0,
+          isPlaying: false,
+          volume: 1,
+          muted: false,
+          playerKind: null,
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
+        true
+      );
+      return;
+    }
+
+    const emitSnapshot = (
+      overrideStatus?: 'PLAYING' | 'PAUSED' | 'BUFFERING' | 'ENDED',
+      immediate = false
+    ) => {
+      const v = videoRef.current;
+      const pos = v && Number.isFinite(v.currentTime) ? v.currentTime : currentTime || 0;
+      const dur = v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration || 0;
+      const playing = v ? !v.paused && !v.ended : isActivelyPlayingRef.current;
+      const status =
+        overrideStatus ||
+        (v?.ended ? 'ENDED' : playing ? 'PLAYING' : 'PAUSED');
+      const epLabel = currentTarget?.isSeries
+        ? `S${String(activeSeasonNum).padStart(2, '0')}E${String(activeEpisodeNum).padStart(2, '0')}`
+        : null;
+
+      publishTvPlaybackState(
+        {
+          status,
+          mediaId: currentTarget?.id != null ? Number(currentTarget.id) : null,
+          currentTitle: currentTarget?.title ? cleanTitle(currentTarget.title) : null,
+          currentEpisode: epLabel,
+          season: currentTarget?.isSeries ? activeSeasonNum : null,
+          episode: currentTarget?.isSeries ? activeEpisodeNum : null,
+          isSeries: Boolean(currentTarget?.isSeries),
+          currentPosition: pos,
+          duration: dur,
+          isPlaying: status === 'PLAYING',
+          volume: v ? v.volume : 1,
+          muted: v ? v.muted : false,
+          playerKind: streamInfoRef.current?.type || currentTarget?.source || null,
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
+        immediate
+      );
+    };
+
+    registerPlayerCommandHandler((cmd) => {
+      const v = videoRef.current;
+      switch (cmd.command) {
+        case 'PLAY':
+          if (v) {
+            void v.play().catch(() => {});
+            emitSnapshot('PLAYING', true);
+          }
+          break;
+        case 'PAUSE':
+          if (v) {
+            v.pause();
+            emitSnapshot('PAUSED', true);
+          }
+          break;
+        case 'SEEK_FORWARD':
+          if (v && Number.isFinite(v.currentTime)) {
+            const delta = Number(cmd.seconds ?? 30);
+            const maxDur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : v.currentTime + delta;
+            v.currentTime = Math.min(maxDur, v.currentTime + delta);
+            emitSnapshot(undefined, true);
+          }
+          break;
+        case 'SEEK_BACKWARD':
+          if (v && Number.isFinite(v.currentTime)) {
+            const delta = Number(cmd.seconds ?? 10);
+            v.currentTime = Math.max(0, v.currentTime - delta);
+            emitSnapshot(undefined, true);
+          }
+          break;
+        case 'SEEK_TO':
+          if (v && typeof cmd.position === 'number' && Number.isFinite(cmd.position)) {
+            const maxDur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : cmd.position;
+            v.currentTime = Math.max(0, Math.min(maxDur, cmd.position));
+            emitSnapshot(undefined, true);
+          }
+          break;
+        case 'VOLUME_SET':
+          if (v && typeof cmd.volume === 'number' && Number.isFinite(cmd.volume)) {
+            v.volume = Math.max(0, Math.min(1, cmd.volume));
+            v.muted = false;
+            emitSnapshot(undefined, true);
+          }
+          break;
+        case 'MUTE_TOGGLE':
+          if (v) {
+            v.muted = !v.muted;
+            emitSnapshot(undefined, true);
+          }
+          break;
+        case 'NEXT_EPISODE':
+          triggerPlayNextEpisode();
+          break;
+        case 'PREVIOUS_EPISODE': {
+          const seasons = seriesDataRef.current?.seasons || [];
+          const curSeasonIdx = seasons.findIndex((s) => s.season_number === activeSeasonNum);
+          if (curSeasonIdx >= 0) {
+            const curSeason = seasons[curSeasonIdx];
+            const curEpIdx = curSeason.episodes.findIndex((ep) => ep.episode_number === activeEpisodeNum);
+            if (curEpIdx > 0) {
+              const prevEp = curSeason.episodes[curEpIdx - 1];
+              handleSelectEpisode(curSeason.season_number, prevEp.episode_number, prevEp.movie_id);
+            } else if (curSeasonIdx > 0) {
+              const prevSeason = seasons[curSeasonIdx - 1];
+              const lastEp = prevSeason.episodes[prevSeason.episodes.length - 1];
+              if (lastEp) {
+                handleSelectEpisode(prevSeason.season_number, lastEp.episode_number, lastEp.movie_id);
+              }
+            }
+          }
+          break;
+        }
+        case 'BACK':
+          onClose();
+          break;
+      }
+    });
+
+    const v = videoRef.current;
+    const onPlayEvt = () => emitSnapshot('PLAYING', true);
+    const onPauseEvt = () => emitSnapshot('PAUSED', true);
+    const onWaitEvt = () => emitSnapshot('BUFFERING', true);
+    const onEndEvt = () => emitSnapshot('ENDED', true);
+    const onSeekEvt = () => emitSnapshot(undefined, true);
+    const onVolEvt = () => emitSnapshot(undefined, true);
+
+    if (v) {
+      v.addEventListener('play', onPlayEvt);
+      v.addEventListener('playing', onPlayEvt);
+      v.addEventListener('pause', onPauseEvt);
+      v.addEventListener('waiting', onWaitEvt);
+      v.addEventListener('ended', onEndEvt);
+      v.addEventListener('seeked', onSeekEvt);
+      v.addEventListener('volumechange', onVolEvt);
+    }
+
+    emitSnapshot(undefined, true);
+    const syncTimer = setInterval(() => emitSnapshot(undefined, false), 2500);
+
+    return () => {
+      clearInterval(syncTimer);
+      if (v) {
+        v.removeEventListener('play', onPlayEvt);
+        v.removeEventListener('playing', onPlayEvt);
+        v.removeEventListener('pause', onPauseEvt);
+        v.removeEventListener('waiting', onWaitEvt);
+        v.removeEventListener('ended', onEndEvt);
+        v.removeEventListener('seeked', onSeekEvt);
+        v.removeEventListener('volumechange', onVolEvt);
+      }
+      registerPlayerCommandHandler(null);
+    };
+  }, [
+    isOpen,
+    currentTarget,
+    activeSeasonNum,
+    activeEpisodeNum,
+    currentTime,
+    duration,
+    registerPlayerCommandHandler,
+    publishTvPlaybackState,
+    triggerPlayNextEpisode,
+    handleSelectEpisode,
+    onClose,
+  ]);
 
   // Fetch stream data from backend with sequence protection & progressive notices (Vanilla L5087-5170)
   const fetchStreamData = useCallback(

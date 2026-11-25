@@ -40,7 +40,8 @@ button:focus-visible:not(.category-tab),
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
-[tabindex="0"]:focus-visible:not(.category-tab) {
+[tabindex="0"]:focus-visible:not(.category-tab),
+.tv-remote-focused {
   outline: var(--focus-ring) !important;
   outline-offset: var(--focus-offset) !important;
   box-shadow: var(--focus-shadow) !important;

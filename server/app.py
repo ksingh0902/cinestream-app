@@ -25,6 +25,7 @@ from app.api import catalog_router, discovery_router, stream_router
 from app.auth.routes import auth_router
 from app.auth.middleware import PrivateAccessMiddleware
 from app.auth.store import init_auth_db
+from app.tv import tv_router, init_tv_db
 
 import asyncio
 import os
@@ -34,6 +35,7 @@ app.include_router(auth_router)
 app.include_router(catalog_router)
 app.include_router(discovery_router)
 app.include_router(stream_router)
+app.include_router(tv_router)
 
 app.add_middleware(PrivateAccessMiddleware)
 app.add_middleware(
@@ -65,6 +67,7 @@ async def _periodic_sync_loop():
 @app.on_event("startup")
 async def startup_sync_scheduler():
     init_auth_db()
+    init_tv_db()
     # Fast startup: do not block boot or burn CPU with heavy multi-view prewarming.
     # Cache warming is handled lazily on-demand per user request.
     global _sync_task

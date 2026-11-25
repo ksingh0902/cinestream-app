@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, Star, Clock, Play, Check, Bookmark, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Star, Clock, Play, Check, Bookmark, AlertTriangle, Tv } from 'lucide-react';
 import { MovieItem } from '../../types/catalogue';
 import { getMovie, getMovies } from '../../api/catalogue';
 import { useRouter } from '../../router';
 import { useWatchlist } from '../watchlist';
 import { useAuth } from '../../context/AuthContext';
+import { useTvRemote } from '../tv-remote';
 import {
   resolveContinueWatchingKey,
   readContinueWatchingRecords,
@@ -23,6 +24,8 @@ export const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ movieId, onPla
   const { navigate, back } = useRouter();
   const { isInList, addItem, removeItem } = useWatchlist();
   const { username, role, authenticated } = useAuth();
+  const { activeController, playOnTv } = useTvRemote();
+  const [sentToTvMsg, setSentToTvMsg] = useState<string | null>(null);
 
   const [movie, setMovie] = useState<MovieItem | null>(null);
   const [recommendations, setRecommendations] = useState<MovieItem[]>([]);
@@ -243,6 +246,30 @@ export const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ movieId, onPla
                   </>
                 )}
               </button>
+
+              {activeController && movie && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const ok = playOnTv({
+                      id: movie.id,
+                      title: movie.title,
+                      year: movie.year,
+                      poster: movie.poster || movie.poster_url,
+                      isSeries: false,
+                      source: movie.source || 'yomovies',
+                      isHindiDubbed: Boolean(movie.is_hindi_dubbed),
+                      duration_s: movie.duration_s,
+                    });
+                    setSentToTvMsg(ok ? `Sent to ${activeController.tvName}` : 'TV disconnected');
+                    setTimeout(() => setSentToTvMsg(null), 3000);
+                  }}
+                >
+                  <Tv size={16} strokeWidth={1.5} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                  {sentToTvMsg || `Play on ${activeController.tvName}`}
+                </button>
+              )}
 
               <button
                 type="button"

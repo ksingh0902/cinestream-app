@@ -7,6 +7,7 @@ import { SeriesSeasonResponse, SeriesSeason, SeriesEpisode } from '../player/typ
 import { useRouter } from '../../router';
 import { useWatchlist } from '../watchlist';
 import { useAuth } from '../../context/AuthContext';
+import { useTvRemote } from '../tv-remote';
 import {
   resolveContinueWatchingKey,
   readContinueWatchingRecords,
@@ -25,6 +26,8 @@ export const SeriesDetailPage: React.FC<SeriesDetailPageProps> = ({ seriesId, on
   const { navigate, back } = useRouter();
   const { isInList, addItem, removeItem } = useWatchlist();
   const { username, role, authenticated } = useAuth();
+  const { activeController, playOnTv } = useTvRemote();
+  const [sentToTvMsg, setSentToTvMsg] = useState<string | null>(null);
 
   const [seriesItem, setSeriesItem] = useState<MovieItem | null>(null);
   const [seasonsData, setSeasonsData] = useState<SeriesSeasonResponse | null>(null);
@@ -304,6 +307,34 @@ export const SeriesDetailPage: React.FC<SeriesDetailPageProps> = ({ seriesId, on
                   </>
                 )}
               </button>
+
+              {activeController && seriesItem && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const targetSeason = activeContinueRecord?.season || selectedSeasonNum || 1;
+                    const targetEp = activeContinueRecord?.episode || 1;
+                    const ok = playOnTv({
+                      id: seriesItem.id,
+                      title: seriesItem.title,
+                      year: seriesItem.year,
+                      poster: seriesItem.poster || seriesItem.poster_url,
+                      isSeries: true,
+                      season: targetSeason,
+                      episode: targetEp,
+                      source: seriesItem.source || 'yomovies',
+                      isHindiDubbed: Boolean(seriesItem.is_hindi_dubbed),
+                      duration_s: seriesItem.duration_s,
+                    });
+                    setSentToTvMsg(ok ? `Sent to ${activeController.tvName}` : 'TV disconnected');
+                    setTimeout(() => setSentToTvMsg(null), 3000);
+                  }}
+                >
+                  <Tv size={16} strokeWidth={1.5} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                  {sentToTvMsg || `Play on ${activeController.tvName}`}
+                </button>
+              )}
 
               <button
                 type="button"

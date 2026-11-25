@@ -68,25 +68,31 @@ export function getSpatialFocusTarget(
     let primaryDist = 0;
     let secondaryDist = 0;
 
+    const tolX = Math.min(4, currentRect.width * 0.25);
+    const tolY = Math.min(4, currentRect.height * 0.25);
+
     switch (direction) {
       case 'left':
-        // Candidate center or right edge must be to the left of current center
-        isDirectionValid = tRect.right <= currentRect.left + 8 || dx < -4;
+        // Candidate must be strictly to the left (never match same-column vertical siblings)
+        isDirectionValid = dx < -4 && (tRect.right <= currentRect.left + tolX || Math.abs(dx) >= Math.abs(dy));
         primaryDist = Math.abs(dx);
         secondaryDist = Math.abs(dy);
         break;
       case 'right':
-        isDirectionValid = tRect.left >= currentRect.right - 8 || dx > 4;
+        // Candidate must be strictly to the right (never match same-column vertical siblings)
+        isDirectionValid = dx > 4 && (tRect.left >= currentRect.right - tolX || Math.abs(dx) >= Math.abs(dy));
         primaryDist = Math.abs(dx);
         secondaryDist = Math.abs(dy);
         break;
       case 'up':
-        isDirectionValid = tRect.bottom <= currentRect.top + 8 || dy < -4;
+        // Candidate must be strictly above (never match same-row horizontal siblings like 8px hero dots)
+        isDirectionValid = dy < -4 && (tRect.bottom <= currentRect.top + tolY || Math.abs(dy) >= Math.abs(dx));
         primaryDist = Math.abs(dy);
         secondaryDist = Math.abs(dx);
         break;
       case 'down':
-        isDirectionValid = tRect.top >= currentRect.bottom - 8 || dy > 4;
+        // Candidate must be strictly below (never match same-row horizontal siblings like 8px hero dots)
+        isDirectionValid = dy > 4 && (tRect.top >= currentRect.bottom - tolY || Math.abs(dy) >= Math.abs(dx));
         primaryDist = Math.abs(dy);
         secondaryDist = Math.abs(dx);
         break;
@@ -105,6 +111,78 @@ export function getSpatialFocusTarget(
   }
 
   return bestTarget;
+}
+
+export const TV_FOCUSED_CLASS = 'tv-remote-focused';
+
+const INITIAL_FOCUS_SELECTOR =
+  '.content-card, .cw-card, .btn-play-large, .btn-nav-back, .category-tab.active, .category-tab';
+
+/**
+ * Remove TV-remote visual focus marker from any previously focused element.
+ */
+export function clearTvFocus(): void {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll<HTMLElement>(`.${TV_FOCUSED_CLASS}`).forEach((el) => {
+    el.classList.remove(TV_FOCUSED_CLASS);
+  });
+}
+
+/**
+ * Focus a target element for TV/remote navigation, apply a visible focus ring
+ * (independent of browser :focus-visible untrusted-event heuristics), and scroll
+ * both vertical page and horizontal row containers smoothly into view.
+ */
+export function applyTvFocus(target: HTMLElement): void {
+  clearTvFocus();
+  target.classList.add(TV_FOCUSED_CLASS);
+  if (typeof target.focus === 'function') {
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      target.focus();
+    }
+  }
+  if (typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+  }
+}
+
+function findInitialVisibleTarget(): HTMLElement | null {
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>(INITIAL_FOCUS_SELECTOR));
+  for (const el of candidates) {
+    if (isElementVisible(el)) {
+      return el;
+    }
+  }
+  return null;
+}
+
+/**
+ * Activate the currently focused TV element (used by remote SELECT).
+ * If nothing is focused yet, focuses the first visible interactive element first.
+ */
+export function activateFocusedTvElement(): boolean {
+  if (typeof document === 'undefined') return false;
+  const marked = document.querySelector<HTMLElement>(`.${TV_FOCUSED_CLASS}`);
+  const active = document.activeElement as HTMLElement | null;
+  const target =
+    (marked && isElementVisible(marked) ? marked : null) ||
+    (active && active !== document.body && active !== document.documentElement && isElementVisible(active)
+      ? active
+      : null);
+
+  if (target) {
+    target.click();
+    return true;
+  }
+
+  const initial = findInitialVisibleTarget();
+  if (initial) {
+    applyTvFocus(initial);
+    return true;
+  }
+  return false;
 }
 
 interface UseTVNavOptions {
@@ -192,29 +270,39 @@ export function useTVNav({ onBack, isPlayerOpen }: UseTVNavOptions = {}) {
       // Determine starting element for spatial calculation
       let currentEl = active;
       if (!currentEl || currentEl === document.body || currentEl === document.documentElement) {
-        // Find first sensible focus target
-        const initialTarget = document.querySelector<HTMLElement>(
-          '.category-tab.active, .category-tab, .btn-nav-back, .btn-play-large, .content-card'
-        );
-        if (initialTarget && isElementVisible(initialTarget)) {
-          e.preventDefault();
-          initialTarget.focus();
-          initialTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const marked = document.querySelector<HTMLElement>(`.${TV_FOCUSED_CLASS}`);
+        if (marked && isElementVisible(marked)) {
+          currentEl = marked;
+        } else {
+          const initialTarget = findInitialVisibleTarget();
+          if (initialTarget) {
+            e.preventDefault();
+            applyTvFocus(initialTarget);
+            lastActiveRef.current = initialTarget;
+            return;
+          }
           return;
         }
-        return;
       }
 
       const nextTarget = getSpatialFocusTarget(currentEl, direction);
       if (nextTarget) {
         e.preventDefault();
-        nextTarget.focus();
-        nextTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        applyTvFocus(nextTarget);
+        lastActiveRef.current = nextTarget;
       }
     };
 
+    const handlePointerDown = () => {
+      clearTvFocus();
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pointerdown', handlePointerDown);
+    };
   }, [onBack, isPlayerOpen]);
 
   return { lastActiveRef };

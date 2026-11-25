@@ -1,13 +1,15 @@
 import React from 'react';
-import { UserRound, Shield, Bookmark, Lock, House, Settings, Info, LogOut } from 'lucide-react';
+import { UserRound, Shield, Bookmark, Lock, House, Settings, Info, LogOut, Tv, Smartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../router';
 import { useWatchlist } from '../watchlist';
+import { useTvRemote } from '../tv-remote';
 
 export const ProfilePage: React.FC = () => {
   const { authenticated, username, role, logout } = useAuth();
   const { navigate } = useRouter();
   const { itemCount: watchlistCount } = useWatchlist();
+  const { deviceRole } = useTvRemote();
 
   if (!authenticated) {
     return (
@@ -98,6 +100,23 @@ export const ProfilePage: React.FC = () => {
             >
               <House size={15} strokeWidth={1.5} /> <span>Home & Continue Watching</span>
             </button>
+            {deviceRole === 'tv' ? (
+              <button
+                type="button"
+                className="btn btn-secondary shortcut-btn"
+                onClick={() => navigate('/tv-connect')}
+              >
+                <Tv size={15} strokeWidth={1.5} /> <span>Connect Phone (TV)</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary shortcut-btn"
+                onClick={() => navigate('/remote')}
+              >
+                <Smartphone size={15} strokeWidth={1.5} /> <span>TV Remote</span>
+              </button>
+            )}
             {role === 'admin' && (
               <button
                 type="button"

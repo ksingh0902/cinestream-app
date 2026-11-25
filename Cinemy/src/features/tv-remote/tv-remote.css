@@ -1,0 +1,504 @@
+.tv-page-container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+.tv-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.tv-id-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--card, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.tv-id-code {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tv-grid-two {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+@media (min-width: 820px) {
+  .tv-grid-two {
+    grid-template-columns: 1.1fr 0.9fr;
+  }
+}
+
+.tv-card {
+  background: var(--card, rgba(20, 22, 30, 0.88));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  padding: 22px;
+}
+
+.tv-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.tv-heading {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+.tv-subheading {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.tv-section-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim, #9ca3af);
+  margin: 18px 0 10px;
+}
+
+.tv-muted {
+  color: var(--dim, #9ca3af);
+  font-size: 13px;
+  margin: 0;
+}
+
+.tv-muted-sm {
+  color: var(--dim, #9ca3af);
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
+.tv-alert {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.tv-alert-error {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fecaca;
+}
+
+.tv-alert-success {
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #bbf7d0;
+}
+
+.tv-qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 14px;
+  margin-bottom: 18px;
+}
+
+.tv-qr-frame.expired {
+  opacity: 0.35;
+}
+
+.tv-code-block {
+  text-align: center;
+}
+
+.tv-code-label {
+  display: block;
+  font-size: 12px;
+  color: var(--dim, #9ca3af);
+  margin-bottom: 4px;
+}
+
+.tv-code-digits {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-code-expiry {
+  display: block;
+  font-size: 12px;
+  color: var(--dim, #9ca3af);
+  margin-top: 6px;
+}
+
+.tv-name-form,
+.tv-code-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-label {
+  font-size: 12px;
+  color: var(--dim, #9ca3af);
+  margin-bottom: 6px;
+}
+
+.tv-name-row {
+  display: flex;
+  gap: 8px;
+}
+
+.tv-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.tv-code-input {
+  font-size: 22px;
+  letter-spacing: 0.18em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-empty-box {
+  padding: 20px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+}
+
+.tv-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tv-list-item,
+.tv-active-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tv-list-item.selected,
+.tv-active-banner {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.tv-list-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tv-list-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+
+.tv-dot-online,
+.tv-status-online {
+  color: #4ade80;
+}
+
+.tv-status-offline {
+  color: #9ca3af;
+}
+
+.tv-role-pill,
+.tv-nearby-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tv-nearby-pill {
+  background: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+}
+
+.tv-btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.tv-pair-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tv-scanner-box {
+  margin: 12px 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+}
+
+.tv-scanner-video {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  display: block;
+}
+
+/* Phase 2-4: Now Playing, Transport Controls, Seek Bar, D-Pad & Search-to-TV */
+.tv-now-playing {
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 18px;
+}
+
+.tv-now-playing-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tv-now-playing-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.tv-now-playing-ep {
+  font-size: 13px;
+  color: var(--dim, #9ca3af);
+  margin: 2px 0 0;
+}
+
+.tv-seek-wrap {
+  margin: 12px 0 14px;
+}
+
+.tv-seek-slider {
+  width: 100%;
+  accent-color: var(--accent, #ff7b39);
+  cursor: pointer;
+}
+
+.tv-seek-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--dim, #9ca3af);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+
+.tv-transport-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Dedicated TV Touchpad Surface (touch-action: none strictly scoped here) */
+.tv-touchpad-card {
+  margin-bottom: 12px;
+}
+
+.tv-touchpad-surface {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  border-radius: 18px;
+  background: radial-gradient(
+    circle at 50% 45%,
+    rgba(255, 123, 57, 0.08) 0%,
+    rgba(20, 24, 34, 0.92) 72%
+  );
+  border: 1px solid var(--border-glass, rgba(255, 255, 255, 0.12));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+  outline: none;
+}
+
+.tv-touchpad-surface:focus-visible {
+  border-color: var(--accent, #ff7b39);
+  box-shadow: 0 0 0 2px var(--accent-glow, rgba(255, 123, 57, 0.28));
+}
+
+.tv-touchpad-surface.active {
+  border-color: var(--accent-border, rgba(255, 123, 57, 0.45));
+  background: radial-gradient(
+    circle at 50% 45%,
+    rgba(255, 123, 57, 0.14) 0%,
+    rgba(20, 24, 34, 0.96) 72%
+  );
+}
+
+.tv-touchpad-surface.feedback-select {
+  border-color: var(--accent, #ff7b39);
+  box-shadow: 0 0 20px var(--accent-glow, rgba(255, 123, 57, 0.35));
+}
+
+.tv-touchpad-surface.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tv-touchpad-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  text-align: center;
+  padding: 16px;
+}
+
+.tv-touchpad-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--txt, #f8fafc);
+}
+
+.tv-touchpad-subtitle {
+  font-size: 13px;
+  color: var(--txt-muted, #94a3b8);
+}
+
+.tv-touchpad-hint {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--accent, #ff7b39);
+  background: var(--accent-subtle, rgba(255, 123, 57, 0.12));
+  border: 1px solid var(--accent-border, rgba(255, 123, 57, 0.35));
+}
+
+/* Subtle edge ticks suggesting 4-way swipe without looking like buttons */
+.tv-touchpad-edge {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+  transition: background-color 0.16s ease;
+}
+
+.tv-touchpad-edge-top,
+.tv-touchpad-edge-bottom {
+  width: 34px;
+  height: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tv-touchpad-edge-top {
+  top: 12px;
+}
+
+.tv-touchpad-edge-bottom {
+  bottom: 12px;
+}
+
+.tv-touchpad-edge-left,
+.tv-touchpad-edge-right {
+  width: 3px;
+  height: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tv-touchpad-edge-left {
+  left: 12px;
+}
+
+.tv-touchpad-edge-right {
+  right: 12px;
+}
+
+.tv-touchpad-surface.feedback-navigate_up .tv-touchpad-edge-top,
+.tv-touchpad-surface.feedback-navigate_down .tv-touchpad-edge-bottom,
+.tv-touchpad-surface.feedback-navigate_left .tv-touchpad-edge-left,
+.tv-touchpad-surface.feedback-navigate_right .tv-touchpad-edge-right {
+  background: var(--accent, #ff7b39);
+}
+
+.tv-secondary-nav-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.tv-secondary-nav-btn {
+  padding: 9px 12px;
+  font-size: 13px;
+  justify-content: center;
+}
+
+.tv-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tv-search-results {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+

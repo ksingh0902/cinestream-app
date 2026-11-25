@@ -13,8 +13,9 @@ import { MyListPage } from './features/watchlist';
 import { SearchPage } from './features/search';
 import { GenrePage } from './features/catalogue';
 import { ProfilePage } from './features/profile';
+import { TvConnectPage, TvRemotePage, TvRemoteProvider, useTvRemote } from './features/tv-remote';
 import { PlaybackTarget, PlayerModal } from './features/player';
-import { useTVNav } from './hooks/useTVNav';
+import { useTVNav, activateFocusedTvElement } from './hooks/useTVNav';
 
 // Lazy-load AdminConsolePage so standard viewers never download administrative chunks
 const AdminConsolePage = lazy(() =>
@@ -24,6 +25,7 @@ const AdminConsolePage = lazy(() =>
 export const AppContent: React.FC = () => {
   const { loading: authLoading, error: authError, isStorageOutage, refreshAuth, authenticated } = useAuth();
   const { path, matchRoute, navigate, back } = useRouter();
+  const { registerMediaLaunchHandler, registerNavigationHandler } = useTvRemote();
 
   const [activeCategory, setActiveCategory] = useState<CategorySelection>({ category: 'all' });
   const [playerTarget, setPlayerTarget] = useState<PlaybackTarget | null>(null);
@@ -34,6 +36,56 @@ export const AppContent: React.FC = () => {
     onBack: back,
     isPlayerOpen: Boolean(playerTarget),
   });
+
+  // TV Remote: Receive LOAD_MEDIA and navigation commands from authorized phones
+  useEffect(() => {
+    registerMediaLaunchHandler((media) => {
+      setPlayerTarget({
+        id: media.id,
+        title: media.title,
+        year: media.year,
+        poster: media.poster,
+        isSeries: Boolean(media.isSeries),
+        season: media.season,
+        episode: media.episode,
+        source: media.source || 'yomovies',
+        isHindiDubbed: media.isHindiDubbed,
+        duration_s: media.duration_s,
+      });
+    });
+
+    registerNavigationHandler((cmd) => {
+      if (cmd.command === 'HOME') {
+        setPlayerTarget(null);
+        setActiveCategory({ category: 'all', resetToken: Date.now() });
+        navigate('/');
+        return;
+      }
+      if (cmd.command === 'BACK') {
+        back();
+        return;
+      }
+      if (cmd.command === 'SELECT') {
+        activateFocusedTvElement();
+        return;
+      }
+      const keyMap: Record<string, string> = {
+        NAVIGATE_UP: 'ArrowUp',
+        NAVIGATE_DOWN: 'ArrowDown',
+        NAVIGATE_LEFT: 'ArrowLeft',
+        NAVIGATE_RIGHT: 'ArrowRight',
+      };
+      const key = keyMap[cmd.command];
+      if (key) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      }
+    });
+
+    return () => {
+      registerMediaLaunchHandler(null);
+      registerNavigationHandler(null);
+    };
+  }, [registerMediaLaunchHandler, registerNavigationHandler, navigate, back]);
 
   // Smart TV: Automatic Initial Focus on Route Transitions
   useEffect(() => {
@@ -96,7 +148,13 @@ export const AppContent: React.FC = () => {
   const genreMatch = matchRoute('/genre/:genreName');
 
   const isDetailPage = movieMatch.matches || seriesMatch.matches || genreMatch.matches;
-  const isUtilityPage = path === '/my-list' || path === '/search' || path === '/profile' || path === '/admin';
+  const isUtilityPage =
+    path === '/my-list' ||
+    path === '/search' ||
+    path === '/profile' ||
+    path === '/admin' ||
+    path === '/tv-connect' ||
+    path === '/remote';
   const showCategoryBar = !isDetailPage && !isUtilityPage;
 
   return (
@@ -179,6 +237,10 @@ export const AppContent: React.FC = () => {
 
       {path === '/profile' && <ProfilePage />}
 
+      {path === '/tv-connect' && <TvConnectPage />}
+
+      {path === '/remote' && <TvRemotePage />}
+
       {path === '/admin' && (
         <Suspense
           fallback={
@@ -233,7 +295,9 @@ export const App: React.FC = () => {
   return (
     <AuthProvider>
       <RouterProvider>
-        <AppContent />
+        <TvRemoteProvider>
+          <AppContent />
+        </TvRemoteProvider>
       </RouterProvider>
     </AuthProvider>
   );

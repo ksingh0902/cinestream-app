@@ -1020,7 +1020,8 @@
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 123, 57, 0.3);
 }
 
-.content-card:focus-visible {
+.content-card:focus-visible,
+.content-card.tv-remote-focused {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent), 0 12px 28px rgba(0, 0, 0, 0.7);
   transform: translateY(-4px) scale(1.03);
@@ -1049,7 +1050,8 @@
 }
 
 .content-card:hover .card-poster-img,
-.content-card:focus-visible .card-poster-img {
+.content-card:focus-visible .card-poster-img,
+.content-card.tv-remote-focused .card-poster-img {
   transform: scale(1.04);
 }
 
