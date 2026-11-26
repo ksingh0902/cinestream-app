@@ -23,9 +23,7 @@ export function isMobilePhoneUserAgent(uaOverride?: string): boolean {
         ? navigator.userAgent || ''
         : '';
   if (!ua || SMART_TV_UA_RE.test(ua)) return false;
-  if (/\b(iphone|ipod|windows phone|blackberry|bb10)\b/i.test(ua)) return true;
-  if (/\bandroid\b/i.test(ua) && /\bmobile\b/i.test(ua)) return true;
-  return false;
+  return /\b(iphone|ipod|ipad|android|mobile|windows phone|blackberry|bb10)\b/i.test(ua);
 }
 
 function hasStoredPhoneController(
@@ -42,9 +40,9 @@ function hasStoredPhoneController(
  * Authoritative device role resolution (never relies on window.innerWidth, CSS media queries, or IP):
  *  1. Explicit Smart TV runtime / UA -> 'tv'
  *  2. Active/stored phone controller -> 'phone' (overrides any stale TV identity)
- *  3. Mobile phone UA -> 'phone'
- *  4. Stored TV identity (e.g., desktop browser registered as TV) -> 'tv'
- *  5. Otherwise -> 'phone'
+ *  3. Mobile phone/tablet UA (iPhone, iPad, Android mobile) -> 'phone'
+ *  4. Stored TV identity -> 'tv'
+ *  5. Non-mobile TV/desktop browser (first visit before registering on /tv-connect) -> 'tv'
  */
 export function resolveDeviceRole(
   tvIdentity: StoredTvIdentity | null,
@@ -55,7 +53,7 @@ export function resolveDeviceRole(
   if (hasStoredPhoneController(controllerState)) return 'phone';
   if (isMobilePhoneUserAgent(uaOverride)) return 'phone';
   if (tvIdentity && tvIdentity.tvId) return 'tv';
-  return 'phone';
+  return 'tv';
 }
 
 const TV_IDENTITY_KEY = 'cinemy_tv_identity_v1';

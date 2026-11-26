@@ -642,8 +642,9 @@ describe('Phase 1: CINEMY TV Remote Pairing Foundation', () => {
     expect(resolveDeviceRole(sampleTvIdentity, null, smartTvUA)).toBe('tv');
     expect(resolveDeviceRole(null, null, smartTvUA)).toBe('tv');
 
-    // Case E — Desktop TV browser (registered TV identity, no controller, desktop UA) -> tv
+    // Case E — Desktop / TV browser (both registered AND first-visit unregistered before /tv-connect) -> tv
     expect(resolveDeviceRole(sampleTvIdentity, null, desktopUA)).toBe('tv');
+    expect(resolveDeviceRole(null, null, desktopUA)).toBe('tv');
 
     // Case F — Stale TV identity cleanup when saveStoredController() runs
     clearStoredTvIdentity();
