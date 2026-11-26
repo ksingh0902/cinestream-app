@@ -232,13 +232,13 @@ describe('Phase 1: CINEMY TV Remote Pairing Foundation', () => {
     expect(matrix[6][0]).toBe(true);
   });
 
-  it('2. TvConnectPage registers persistent TV identity and displays QR code + 6-digit code', async () => {
+  it('2. TvConnectPage registers persistent TV identity and displays 6-digit code without QR code', async () => {
     render(<TvConnectPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('tv-pairing-code').textContent).toBe('583 214');
-      expect(screen.getByRole('img', { name: /QR code to pair Living Room TV/i })).toBeDefined();
     });
+    expect(screen.queryByRole('img', { name: /QR code/i })).toBeNull();
 
     expect(mockRegisterTv).toHaveBeenCalledTimes(1);
     expect(mockStartPairing).toHaveBeenCalledWith('tv_livingroom1');
@@ -247,13 +247,14 @@ describe('Phase 1: CINEMY TV Remote Pairing Foundation', () => {
     expect(saved.deviceSecret).toBe('sec_abc123');
   });
 
-  it('3. TvRemotePage lists nearby TVs and completes pairing via 6-digit code fallback', async () => {
+  it('3. TvRemotePage lists nearby TVs and completes pairing via 6-digit code without Scan QR button', async () => {
     render(<TvRemotePage />);
 
     await waitFor(() => {
       expect(screen.getByText('Living Room TV')).toBeDefined();
       expect(screen.getByText('Bedroom TV')).toBeDefined();
     });
+    expect(screen.queryByRole('button', { name: /Scan QR Code/i })).toBeNull();
 
     const input = screen.getByLabelText(/Enter 6-Digit TV Code/i);
     fireEvent.change(input, { target: { value: '583 214' } });

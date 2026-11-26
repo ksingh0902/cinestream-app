@@ -15,11 +15,13 @@ Completely distinct from Trending Now:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ..api.routes_catalog import (
@@ -43,6 +45,30 @@ EVERGREEN_CACHE_TTL = 120.0
 EVERGREEN_CACHE_MAX = 64
 DEFAULT_EVERGREEN_LIMIT = 50
 MAX_EVERGREEN_LIMIT = 50
+EVERGREEN_ROTATION_AMPLITUDE = 3.5  # Secondary periodic nudge (±3.5 pts) so base evergreen strength stays primary
+
+_IST_FALLBACK_TZ = timezone(timedelta(hours=5, minutes=30))
+try:
+    from zoneinfo import ZoneInfo
+
+    _KOLKATA_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    _KOLKATA_TZ = _IST_FALLBACK_TZ
+
+
+def get_evergreen_period_key(period_override: Optional[str] = None) -> str:
+    """Return the canonical 7-day rotation period key (YYYY-week-WW) in Asia/Kolkata."""
+    if period_override and str(period_override).strip():
+        return str(period_override).strip()
+    iso_year, iso_week, _ = datetime.now(_KOLKATA_TZ).isocalendar()
+    return f"{iso_year}-week-{iso_week:02d}"
+
+
+def _evergreen_rotation_unit(period_key: str, canonical_key: tuple[str, int]) -> float:
+    """Deterministic float in [0.0, 1.0) seeded by 7-day rotation period + canonical (title, is_series)."""
+    seed_str = f"cinemy-evergreen:{period_key}:{canonical_key[0]}|{canonical_key[1]}"
+    digest = hashlib.sha256(seed_str.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 # Backwards-compatible aliases
 POPULAR_CACHE_TTL = EVERGREEN_CACHE_TTL
@@ -332,22 +358,33 @@ def get_evergreen_titles(
     limit: int = DEFAULT_EVERGREEN_LIMIT,
     exclude_ids: Optional[list[int]] = None,
     exclude_titles: Optional[set[str]] = None,
+    *,
+    period_key: Optional[str] = None,
 ) -> dict[str, Any]:
     """
-    Return up to `limit` (default 50, max 50) evergreen all-time popular titles,
-    excluding animated titles and canonical Trending overlaps, balanced across
-    CINEMY's Hindi, English/Hollywood, Punjabi, and Indian regional catalogue.
+    Return up to `limit` (default 50, max 50) evergreen all-time popular titles.
+    Always computes and caches the full 50-title Evergreen pool for the active 7-day
+    Asia/Kolkata rotation period, then slices `[:limit]` so `limit=18` is always
+    identical to the first 18 titles of `limit=50`.
     """
     limit = min(MAX_EVERGREEN_LIMIT, max(1, int(limit)))
     clean_ex_ids = sorted({int(x) for x in (exclude_ids or []) if isinstance(x, int) and x > 0})[:100]
     clean_ex_titles = sorted({t for t in (exclude_titles or set()) if t})[:100]
+    active_period = get_evergreen_period_key(period_key)
 
-    cache_key = (limit, tuple(clean_ex_ids), tuple(clean_ex_titles))
+    # Cache the full 50-title pool by (exclusions, period) so any limit<=50 is a consistent slice
+    cache_key = (tuple(clean_ex_ids), tuple(clean_ex_titles), active_period)
     now_mono = time.monotonic()
     with _evergreen_cache_lock:
         cached = _evergreen_cache.get(cache_key)
         if cached and (now_mono - cached[0] < EVERGREEN_CACHE_TTL):
-            return cached[1]
+            full_items = cached[1]["items"]
+            sliced = full_items[:limit]
+            return {
+                "items": sliced,
+                "total": len(sliced),
+                "mode": "evergreen_picks",
+            }
 
     ex_id_set = set(clean_ex_ids)
     ex_title_set = set(clean_ex_titles)
@@ -459,7 +496,10 @@ def get_evergreen_titles(
         is_s = 1 if d.get("is_series") else 0
         key = (nt, is_s)
         distinct_sources = get_canonical_source_count(d.get("title"), is_s)
-        score = _evergreen_popular_score(d, distinct_sources)
+        base_score = _evergreen_popular_score(d, distinct_sources)
+        # Secondary deterministic 7-day rotation nudge (±3.5 pts) so strong evergreen titles stay favoured
+        rot_delta = (_evergreen_rotation_unit(active_period, key) - 0.5) * (EVERGREEN_ROTATION_AMPLITUDE * 2.0)
+        score = round(base_score + rot_delta, 4)
         prio = _source_priority(d.get("source"))
 
         is_excluded = (int(d["id"]) in ex_id_set) or (nt in ex_title_set)
@@ -477,11 +517,12 @@ def get_evergreen_titles(
         dedup_primary.values(),
         key=lambda e: (-e[0], e[1], -(int(e[2].get("id") or 0))),
     )
-    items = _select_balanced_evergreen(ordered_primary, limit=limit)
+    # Always build the full 50-title Evergreen pool first, then slice to requested limit
+    full_pool = _select_balanced_evergreen(ordered_primary, limit=MAX_EVERGREEN_LIMIT)
 
-    # Only fall back to excluded items if the catalogue is too small to fill `limit`
-    if len(items) < limit and dedup_overflow:
-        used_keys = {(_normalized_title(m.get("title")), 1 if m.get("is_series") else 0) for m in items}
+    # Only fall back to excluded items if the catalogue is too small to fill MAX_EVERGREEN_LIMIT
+    if len(full_pool) < MAX_EVERGREEN_LIMIT and dedup_overflow:
+        used_keys = {(_normalized_title(m.get("title")), 1 if m.get("is_series") else 0) for m in full_pool}
         ordered_overflow = sorted(
             dedup_overflow.values(),
             key=lambda e: (-e[0], e[1], -(int(e[2].get("id") or 0))),
@@ -489,14 +530,14 @@ def get_evergreen_titles(
         for _, _, row in ordered_overflow:
             k = (_normalized_title(row.get("title")), 1 if row.get("is_series") else 0)
             if k not in used_keys:
-                items.append(_format_row(row))
+                full_pool.append(_format_row(row))
                 used_keys.add(k)
-                if len(items) >= limit:
+                if len(full_pool) >= MAX_EVERGREEN_LIMIT:
                     break
 
-    result = {
-        "items": items[:limit],
-        "total": len(items[:limit]),
+    full_result = {
+        "items": full_pool[:MAX_EVERGREEN_LIMIT],
+        "total": len(full_pool[:MAX_EVERGREEN_LIMIT]),
         "mode": "evergreen_picks",
     }
 
@@ -504,9 +545,14 @@ def get_evergreen_titles(
         if len(_evergreen_cache) >= EVERGREEN_CACHE_MAX:
             oldest = min(_evergreen_cache, key=lambda k: _evergreen_cache[k][0])
             _evergreen_cache.pop(oldest, None)
-        _evergreen_cache[cache_key] = (now_mono, result)
+        _evergreen_cache[cache_key] = (now_mono, full_result)
 
-    return result
+    sliced = full_result["items"][:limit]
+    return {
+        "items": sliced,
+        "total": len(sliced),
+        "mode": "evergreen_picks",
+    }
 
 
 # Clean aliases

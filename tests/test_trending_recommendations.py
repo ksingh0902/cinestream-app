@@ -520,5 +520,305 @@ class TestTrendingAndRecommendations(unittest.TestCase):
         self.assertFalse(any("jatt & juliet" in t for t in ev_titles))
 
 
+class TestTrendingDailyRotation(unittest.TestCase):
+    """Focused tests for deterministic daily-rotating Trending Now."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp(prefix="cinemy_trending_daily_")
+        cls.db_path = os.path.join(cls.temp_dir, "test_trending_daily.db")
+        os.environ["DB_PATH"] = cls.db_path
+
+        con = connect(cls.db_path)
+        con.close()
+        migrate_database(cls.db_path)
+
+        con = connect(cls.db_path)
+        languages = ["Hindi", "English", "Punjabi", "Tamil", "English"]
+        genres_pool = [
+            ["Action", "Thriller"],
+            ["Drama", "Crime"],
+            ["Comedy", "Punjabi"],
+            ["Sci-fi", "Mystery"],
+            ["Hollywood", "Action"],
+        ]
+        qualities = ["4K", "1080p", "WEB-DL", "BluRay", "720p"]
+        for idx in range(1, 81):
+            is_series = 1 if idx % 2 == 0 else 0
+            lang = languages[idx % len(languages)]
+            year = str(2023 + (idx % 4))
+            rating = round(7.0 + ((idx * 7) % 21) * 0.1, 1)
+            url = f"https://ex.com/daily/{idx}"
+            upsert(con, {
+                "url": url,
+                "title": f"Daily Candidate {idx}",
+                "year": year,
+                "genres": genres_pool[idx % len(genres_pool)],
+                "language": lang,
+                "quality": qualities[idx % len(qualities)],
+                "rating": rating,
+                "is_series": is_series,
+                "source": "yomovies" if idx % 2 == 0 else "dooflix",
+                "source_id": f"daily-{idx}",
+                "poster": f"https://ex.com/p/daily-{idx}.jpg",
+            })
+            con.execute(
+                "UPDATE movies SET rating = ?, language = ?, is_series = ? WHERE url = ?",
+                (rating, lang, is_series, url),
+            )
+        con.commit()
+        con.close()
+
+        cls.app = FastAPI()
+        cls.app.include_router(discovery_router)
+        cls.client = TestClient(cls.app)
+
+    @classmethod
+    def tearDownClass(cls):
+        invalidate_discovery_cache()
+        if "DB_PATH" in os.environ:
+            del os.environ["DB_PATH"]
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def setUp(self):
+        invalidate_discovery_cache()
+
+    def test_01_same_day_determinism_and_no_per_request_randomness(self):
+        from app.discovery.trending import get_trending_titles, invalidate_trending_cache
+
+        d1 = get_trending_titles(limit=18, date_key="2026-11-27")
+        invalidate_trending_cache()  # Prove determinism does not rely on cache hit
+        d2 = get_trending_titles(limit=18, date_key="2026-11-27")
+        self.assertEqual([x["id"] for x in d1["items"]], [x["id"] for x in d2["items"]])
+
+        # Repeated HTTP requests on same date return identical ordering
+        r1 = self.client.get("/api/discovery/trending?limit=18")
+        r2 = self.client.get("/api/discovery/trending?limit=18")
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual([x["id"] for x in r1.json()["items"]], [x["id"] for x in r2.json()["items"]])
+
+    def test_02_daily_rotation_changes_lineup_across_dates(self):
+        from app.discovery.trending import get_trending_titles
+
+        day1 = get_trending_titles(limit=18, date_key="2026-11-27")
+        day2 = get_trending_titles(limit=18, date_key="2026-11-28")
+        day3 = get_trending_titles(limit=18, date_key="2026-11-29")
+
+        ids1 = [x["id"] for x in day1["items"]]
+        ids2 = [x["id"] for x in day2["items"]]
+        ids3 = [x["id"] for x in day3["items"]]
+
+        self.assertEqual(len(ids1), 18)
+        self.assertEqual(len(ids2), 18)
+        self.assertEqual(len(ids3), 18)
+        self.assertEqual(len(set(ids1)), 18)
+        self.assertNotEqual(ids1, ids2)
+        self.assertNotEqual(ids2, ids3)
+
+    def test_03_limits_18_and_50_mixed_movies_and_series_and_api_contract(self):
+        r18 = self.client.get("/api/discovery/trending?limit=18")
+        r50 = self.client.get("/api/discovery/trending?limit=50")
+        self.assertEqual(r18.status_code, 200)
+        self.assertEqual(r50.status_code, 200)
+
+        d18, d50 = r18.json(), r50.json()
+        # Seamless 18 -> 50 horizontal expansion requires limit=18 to match first 18 of limit=50
+        self.assertEqual(
+            [x["id"] for x in d18["items"]],
+            [x["id"] for x in d50["items"][:18]],
+        )
+        for payload, expected_len in ((d18, 18), (d50, 50)):
+            self.assertIn("items", payload)
+            self.assertIn("total", payload)
+            self.assertIn("mode", payload)
+            self.assertIn("is_fallback", payload)
+            self.assertEqual(payload["total"], expected_len)
+            self.assertEqual(len(payload["items"]), expected_len)
+            movies_cnt = sum(1 for x in payload["items"] if not x.get("is_series"))
+            series_cnt = sum(1 for x in payload["items"] if x.get("is_series"))
+            self.assertGreater(movies_cnt, 0)
+            self.assertGreater(series_cnt, 0)
+
+
+class TestEvergreenFullPoolRotation(unittest.TestCase):
+    """Focused tests for 7-day deterministic full-50 Evergreen Picks rotation and 18-vs-50 consistency."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp(prefix="cinemy_evergreen_rot_")
+        cls.db_path = os.path.join(cls.temp_dir, "test_evergreen_rot.db")
+        os.environ["DB_PATH"] = cls.db_path
+
+        con = connect(cls.db_path)
+        con.close()
+        migrate_database(cls.db_path)
+
+        con = connect(cls.db_path)
+        # Seed 90 strong eligible evergreen titles (movies + series, English + Hindi/Bollywood + Regional)
+        # plus 5 animated titles (must be excluded) and 5 weak low-rated titles (must not beat strong classics)
+        for idx in range(1, 91):
+            is_series = 1 if idx % 2 == 0 else 0
+            if idx % 3 == 0:
+                genres = ["Bollywood", "Drama"]
+                lang = "Hindi"
+                country = ["India"]
+            elif idx % 5 == 0:
+                genres = ["Comedy", "Hollywood"]
+                lang = "English"
+                country = ["United States"]
+            else:
+                genres = ["Drama", "Thriller"]
+                lang = "English"
+                country = ["United States"]
+            year = str(1994 + (idx % 28))
+            rating = round(8.0 + ((idx * 3) % 13) * 0.1, 1)  # 8.0..9.2
+            url = f"https://ex.com/ev/{idx}"
+            upsert(con, {
+                "url": url,
+                "title": f"Evergreen Classic {idx}",
+                "year": year,
+                "genres": genres,
+                "actors": ["Lead A", "Lead B", "Lead C", "Lead D", "Lead E"],
+                "director": ["Director A"],
+                "country": country,
+                "language": lang,
+                "quality": "1080p",
+                "rating": rating,
+                "is_series": is_series,
+                "source": "yomovies" if idx % 2 == 0 else "dooflix",
+                "source_id": f"ev-{idx}",
+                "poster": f"https://ex.com/p/ev-{idx}.jpg",
+                "synopsis": f"Acclaimed long-term evergreen title number {idx} with rich cast and story.",
+            })
+            con.execute(
+                "UPDATE movies SET rating = ?, language = ?, is_series = ? WHERE url = ?",
+                (rating, lang, is_series, url),
+            )
+
+        # Animated titles with high rating (MUST be excluded)
+        for a in range(1, 6):
+            url = f"https://ex.com/ev-anim/{a}"
+            upsert(con, {
+                "url": url,
+                "title": f"Animated Hit {a}",
+                "year": "2019",
+                "genres": ["Animation", "Adventure"],
+                "actors": ["Voice A", "Voice B", "Voice C"],
+                "language": "English",
+                "quality": "4K",
+                "rating": 9.3,
+                "is_series": 0,
+                "source": "yomovies",
+                "source_id": f"ev-anim-{a}",
+                "poster": f"https://ex.com/p/ev-anim-{a}.jpg",
+                "synopsis": "High rated animated film that must stay excluded from Evergreen Picks.",
+            })
+            con.execute("UPDATE movies SET rating = 9.3 WHERE url = ?", (url,))
+
+        # Weak low-rated titles (MUST NOT displace strong 8.0-9.2 classics)
+        for w in range(1, 6):
+            url = f"https://ex.com/ev-weak/{w}"
+            upsert(con, {
+                "url": url,
+                "title": f"Weak Release {w}",
+                "year": "2025",
+                "genres": ["Drama"],
+                "language": "English",
+                "quality": "SD",
+                "rating": 4.2,
+                "is_series": 0,
+                "source": "ask4movie",
+                "source_id": f"ev-weak-{w}",
+                "poster": f"https://ex.com/p/ev-weak-{w}.jpg",
+            })
+            con.execute("UPDATE movies SET rating = 4.2 WHERE url = ?", (url,))
+
+        con.commit()
+        con.close()
+
+        cls.app = FastAPI()
+        cls.app.include_router(discovery_router)
+        cls.client = TestClient(cls.app)
+
+    @classmethod
+    def tearDownClass(cls):
+        invalidate_discovery_cache()
+        if "DB_PATH" in os.environ:
+            del os.environ["DB_PATH"]
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def setUp(self):
+        invalidate_discovery_cache()
+
+    def test_01_same_period_determinism_and_no_request_randomness(self):
+        from app.discovery.popular import get_evergreen_titles, invalidate_evergreen_cache
+
+        p1 = get_evergreen_titles(limit=50, period_key="2026-week-48")
+        invalidate_evergreen_cache()
+        p2 = get_evergreen_titles(limit=50, period_key="2026-week-48")
+        self.assertEqual([x["id"] for x in p1["items"]], [x["id"] for x in p2["items"]])
+
+        # Repeated HTTP requests within the same rotation period return identical order
+        r1 = self.client.get("/api/discovery/evergreen?limit=50")
+        r2 = self.client.get("/api/discovery/evergreen?limit=50")
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual([x["id"] for x in r1.json()["items"]], [x["id"] for x in r2.json()["items"]])
+
+    def test_02_rotation_period_change_rotates_full_50_pool(self):
+        from app.discovery.popular import get_evergreen_titles
+
+        w1 = get_evergreen_titles(limit=50, period_key="2026-week-48")
+        w2 = get_evergreen_titles(limit=50, period_key="2026-week-49")
+        ids1 = [x["id"] for x in w1["items"]]
+        ids2 = [x["id"] for x in w2["items"]]
+
+        self.assertEqual(len(ids1), 50)
+        self.assertEqual(len(ids2), 50)
+        self.assertEqual(len(set(ids1)), 50)
+        self.assertNotEqual(ids1, ids2)
+        # Rotation should stay mostly stable (strong overlap) rather than random churn
+        overlap = len(set(ids1) & set(ids2))
+        self.assertGreaterEqual(overlap, 20)
+
+    def test_03_limit_18_equals_first_18_of_limit_50(self):
+        from app.discovery.popular import get_evergreen_titles, invalidate_evergreen_cache
+
+        p50 = get_evergreen_titles(limit=50, period_key="2026-week-48")
+        invalidate_evergreen_cache()
+        p18 = get_evergreen_titles(limit=18, period_key="2026-week-48")
+
+        self.assertEqual(len(p50["items"]), 50)
+        self.assertEqual(len(p18["items"]), 18)
+        self.assertEqual(
+            [x["id"] for x in p18["items"]],
+            [x["id"] for x in p50["items"][:18]],
+        )
+
+    def test_04_content_rules_and_evergreen_strength_preserved(self):
+        from app.discovery.popular import get_evergreen_titles
+
+        res = get_evergreen_titles(limit=50, period_key="2026-week-48")
+        items = res["items"]
+        self.assertEqual(len(items), 50)
+
+        # No animated content and no weak 4.2 titles displacing strong classics
+        for item in items:
+            self.assertNotIn("Animated Hit", item["title"])
+            self.assertNotIn("Weak Release", item["title"])
+
+        # Both movies and series represented
+        movies_cnt = sum(1 for x in items if not x.get("is_series"))
+        series_cnt = sum(1 for x in items if x.get("is_series"))
+        self.assertGreater(movies_cnt, 0)
+        self.assertGreater(series_cnt, 0)
+
+        # Hindi & English both represented
+        langs = {str(x.get("language") or "").lower() for x in items}
+        self.assertIn("hindi", langs)
+        self.assertIn("english", langs)
+
+
 if __name__ == "__main__":
     unittest.main()

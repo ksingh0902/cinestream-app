@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Tv,
   Smartphone,
-  QrCode,
   KeyRound,
   RefreshCw,
   Unlink,
@@ -80,8 +79,6 @@ export const TvRemotePage: React.FC = () => {
   const [phoneName, setPhoneName] = useState<string>(defaultPhoneName);
   const [loadingDevices, setLoadingDevices] = useState<boolean>(false);
   const [pairingBusy, setPairingBusy] = useState<boolean>(false);
-  const [scannerOpen, setScannerOpen] = useState<boolean>(false);
-  const [scannerNote, setScannerNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -90,8 +87,6 @@ export const TvRemotePage: React.FC = () => {
   const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
   const [searching, setSearching] = useState<boolean>(false);
 
-  const videoScanRef = useRef<HTMLVideoElement | null>(null);
-  const scanStreamRef = useRef<MediaStream | null>(null);
   const qrHandledRef = useRef<string>('');
 
   const refreshDevices = useCallback(async () => {
@@ -165,7 +160,7 @@ export const TvRemotePage: React.FC = () => {
     [phoneName, refreshDevices, refreshPhoneControllers]
   );
 
-  // Auto-complete QR pairing when opened via scanned URL (/remote?pid=...&t=...)
+  // Auto-complete deep-link pairing when opened via URL (/remote?pid=...&t=...)
   useEffect(() => {
     if (!authenticated || !search) return;
     const params = new URLSearchParams(search);
@@ -179,71 +174,6 @@ export const TvRemotePage: React.FC = () => {
       });
     }
   }, [authenticated, search, finishPairing, navigate]);
-
-  const stopScanner = useCallback(() => {
-    if (scanStreamRef.current) {
-      scanStreamRef.current.getTracks().forEach((t) => t.stop());
-      scanStreamRef.current = null;
-    }
-    setScannerOpen(false);
-  }, []);
-
-  useEffect(() => {
-    return () => stopScanner();
-  }, [stopScanner]);
-
-  const handleOpenScanner = async () => {
-    setScannerNote(null);
-    setError(null);
-    const hasCamera = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
-    const BarcodeDetectorCtor = (window as any)?.BarcodeDetector;
-    if (!hasCamera || !BarcodeDetectorCtor) {
-      setScannerNote(
-        'In-browser QR camera scanning is not supported on this browser. You can scan the TV QR directly with your phone camera app, or enter the 6-digit code below.'
-      );
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-      });
-      scanStreamRef.current = stream;
-      setScannerOpen(true);
-      requestAnimationFrame(() => {
-        if (videoScanRef.current) {
-          videoScanRef.current.srcObject = stream;
-          void videoScanRef.current.play().catch(() => {});
-        }
-      });
-
-      const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-      const poll = setInterval(async () => {
-        if (!videoScanRef.current || !scanStreamRef.current) {
-          clearInterval(poll);
-          return;
-        }
-        try {
-          const codes = await detector.detect(videoScanRef.current);
-          if (codes && codes.length > 0) {
-            const raw = String(codes[0].rawValue || '');
-            const url = new URL(raw, window.location.origin);
-            const pid = url.searchParams.get('pid');
-            const tok = url.searchParams.get('t');
-            if (pid && tok) {
-              clearInterval(poll);
-              stopScanner();
-              void finishPairing({ pairing_id: pid, pairing_token: tok });
-            }
-          }
-        } catch {
-          // Ignore single frame errors
-        }
-      }, 450);
-    } catch {
-      setScannerNote('Camera permission was denied. Enter the 6-digit code shown on your TV instead.');
-    }
-  };
 
   const handleCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -371,7 +301,7 @@ export const TvRemotePage: React.FC = () => {
             <div className="tv-empty-box" data-testid="no-tv-connected-banner" style={{ marginBottom: '16px' }}>
               <p style={{ fontWeight: 600, margin: '0 0 6px' }}>No TV connected</p>
               <p className="tv-muted-sm" style={{ marginBottom: '12px' }}>
-                Select a nearby TV below, scan a TV QR code, or enter a 6-digit code to pair.
+                Select a nearby TV below or enter the 6-digit code displayed on your TV.
               </p>
               <button
                 type="button"
@@ -590,7 +520,7 @@ export const TvRemotePage: React.FC = () => {
           {devices.length === 0 ? (
             <div className="tv-empty-box">
               <p className="tv-muted">No CINEMY TVs registered on this account yet.</p>
-              <p className="tv-muted-sm">On your TV browser, open Profile → Connect Phone to display a QR code.</p>
+              <p className="tv-muted-sm">On your TV browser, open Profile → Connect Phone to display a 6-digit code.</p>
             </div>
           ) : (
             <ul className="tv-list">
@@ -632,34 +562,15 @@ export const TvRemotePage: React.FC = () => {
           )}
         </div>
 
-        {/* Right: Pair via QR or 6-Digit Code */}
+        {/* Right: Pair via 6-Digit Code */}
         <div className="tv-card">
           <div className="tv-card-header">
-            <QrCode size={22} />
+            <KeyRound size={22} />
             <div>
               <h2 className="tv-subheading">Pair a TV</h2>
-              <p className="tv-muted">Scan the QR code on your TV or enter the 6-digit fallback code.</p>
+              <p className="tv-muted">Enter the 6-digit code shown on your TV.</p>
             </div>
           </div>
-
-          <div className="tv-pair-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={scannerOpen ? stopScanner : handleOpenScanner}
-              disabled={pairingBusy}
-            >
-              <QrCode size={16} /> <span>{scannerOpen ? 'Close QR Scanner' : 'Scan QR Code'}</span>
-            </button>
-          </div>
-
-          {scannerNote && <p className="tv-muted-sm" style={{ marginTop: '10px' }}>{scannerNote}</p>}
-
-          {scannerOpen && (
-            <div className="tv-scanner-box">
-              <video ref={videoScanRef} playsInline muted className="tv-scanner-video" />
-            </div>
-          )}
 
           <form className="tv-code-form" onSubmit={handleCodeSubmit}>
             <label htmlFor="tv-code-input" className="tv-label">

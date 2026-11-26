@@ -10,7 +10,6 @@ import {
 } from './api';
 import { readStoredTvIdentity, saveStoredTvIdentity } from './storage';
 import { StartPairingResponse, TvControllerSummary } from './types';
-import { QrCodeSvg } from './QrCodeSvg';
 import { useTvRemote } from './TvRemoteContext';
 import './tv-remote.css';
 
@@ -165,8 +164,6 @@ export const TvConnectPage: React.FC = () => {
     );
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const qrValue = pairing ? `${origin}${pairing.qr_path}` : '';
   const isExpired = Boolean(pairing && secondsLeft <= 0);
 
   return (
@@ -186,13 +183,13 @@ export const TvConnectPage: React.FC = () => {
       </div>
 
       <div className="tv-grid-two">
-        {/* Left: QR + 6-Digit Pairing Card */}
+        {/* Left: 6-Digit Pairing Code Card */}
         <div className="tv-card">
           <div className="tv-card-header">
             <Tv size={22} />
             <div>
               <h1 className="tv-heading">Connect Phone</h1>
-              <p className="tv-muted">Scan the QR code or enter the 6-digit code in CINEMY TV Remote on your phone.</p>
+              <p className="tv-muted">Enter the 6-digit code below in CINEMY TV Remote on your phone.</p>
             </div>
           </div>
 
@@ -201,23 +198,17 @@ export const TvConnectPage: React.FC = () => {
 
           <div className="tv-qr-panel">
             {pairing ? (
-              <>
-                <div className={`tv-qr-frame ${isExpired ? 'expired' : ''}`}>
-                  <QrCodeSvg value={qrValue} size={210} label={`QR code to pair ${tvName}`} />
+              <div className="tv-code-block">
+                <span className="tv-code-label">Enter this code on your phone</span>
+                <div className="tv-code-digits" data-testid="tv-pairing-code">
+                  {pairing.display_code}
                 </div>
-
-                <div className="tv-code-block">
-                  <span className="tv-code-label">Or enter code on your phone</span>
-                  <div className="tv-code-digits" data-testid="tv-pairing-code">
-                    {pairing.display_code}
-                  </div>
-                  <span className="tv-code-expiry">
-                    {isExpired
-                      ? 'Code expired — click Refresh Code'
-                      : `Expires in ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')} • Waiting for connection...`}
-                  </span>
-                </div>
-              </>
+                <span className="tv-code-expiry">
+                  {isExpired
+                    ? 'Code expired — click Refresh Code'
+                    : `Expires in ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')} • Waiting for connection...`}
+                </span>
+              </div>
             ) : (
               <p className="tv-muted">{loading ? 'Generating pairing code...' : 'No active pairing code.'}</p>
             )}
@@ -266,7 +257,7 @@ export const TvConnectPage: React.FC = () => {
           {controllers.length === 0 ? (
             <div className="tv-empty-box">
               <p className="tv-muted">No phones connected yet.</p>
-              <p className="tv-muted-sm">Open CINEMY → TV Remote on your phone and scan the QR code or enter the 6-digit code.</p>
+              <p className="tv-muted-sm">Open CINEMY → TV Remote on your phone and enter the 6-digit code.</p>
             </div>
           ) : (
             <>

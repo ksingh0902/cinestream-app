@@ -579,4 +579,73 @@ describe('Progressive Home Lazy Loading (IntersectionObserver)', () => {
     });
     expect(screen.queryByText('Viewer A Rec')).toBeNull();
   });
+
+  it('5. Progressive horizontal load (18 -> 50): scrolling near right edge of Trending and Evergreen appends cards 19-50 once without duplicating 1-18', async () => {
+    installMockIntersectionObserver();
+    const trending50 = Array.from({ length: 50 }, (_, i) => mockMovie(500 + i, `Trending Title ${i + 1}`));
+    const evergreen50 = Array.from({ length: 50 }, (_, i) => mockMovie(700 + i, `Evergreen Title ${i + 1}`));
+
+    mockGetTrending.mockImplementation(({ limit }: { limit?: number }) =>
+      Promise.resolve({
+        items: trending50.slice(0, limit || 18),
+        total: limit || 18,
+        mode: 'fallback_trending',
+        is_fallback: true,
+      })
+    );
+    mockGetRecommended.mockImplementation(({ limit }: { limit?: number }) =>
+      Promise.resolve({
+        items: evergreen50.slice(0, limit || 18),
+        total: limit || 18,
+        personalized: false,
+        mode: 'evergreen_fallback',
+      })
+    );
+
+    const { container } = render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    triggerIntersection('trending', true);
+    triggerIntersection('evergreen', true);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('#section-trending-now .content-card').length).toBe(18);
+      expect(container.querySelectorAll('#section-recommended-for-you .content-card').length).toBe(18);
+    });
+
+    // Simulate horizontal scroll near right edge of Trending track
+    const trendingTrack = container.querySelector('#section-trending-now .discovery-row-track') as HTMLElement;
+    Object.defineProperty(trendingTrack, 'scrollWidth', { configurable: true, value: 3000 });
+    Object.defineProperty(trendingTrack, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(trendingTrack, 'scrollLeft', { configurable: true, value: 1700 });
+    fireEvent.scroll(trendingTrack);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('#section-trending-now .content-card').length).toBe(50);
+    });
+    expect(mockGetTrending).toHaveBeenCalledWith({ limit: 50 });
+
+    // Scrolling again near the end must NOT fire duplicate limit=50 requests
+    fireEvent.scroll(trendingTrack);
+    expect(mockGetTrending).toHaveBeenCalledTimes(2); // 1x limit=18 + 1x limit=50
+
+    // Simulate horizontal scroll near right edge of Evergreen track
+    const evergreenTrack = container.querySelector('#section-recommended-for-you .discovery-row-track') as HTMLElement;
+    Object.defineProperty(evergreenTrack, 'scrollWidth', { configurable: true, value: 3000 });
+    Object.defineProperty(evergreenTrack, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(evergreenTrack, 'scrollLeft', { configurable: true, value: 1700 });
+    fireEvent.scroll(evergreenTrack);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('#section-recommended-for-you .content-card').length).toBe(50);
+    });
+    expect(mockGetRecommended).toHaveBeenCalledWith({ limit: 50 });
+    fireEvent.scroll(evergreenTrack);
+    expect(mockGetRecommended).toHaveBeenCalledTimes(2); // 1x limit=18 + 1x limit=50
+  });
 });

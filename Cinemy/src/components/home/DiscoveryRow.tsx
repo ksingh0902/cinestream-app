@@ -18,6 +18,9 @@ interface DiscoveryRowProps {
   onSeeAll?: () => void;
   seeAllLabel?: string;
   isUpgradeRow?: boolean;
+  hasMoreHorizontal?: boolean;
+  loadingMoreHorizontal?: boolean;
+  onLoadMoreHorizontal?: () => void;
 }
 
 export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
@@ -33,8 +36,22 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
   onSeeAll,
   seeAllLabel = 'See All',
   isUpgradeRow = false,
+  hasMoreHorizontal = false,
+  loadingMoreHorizontal = false,
+  onLoadMoreHorizontal,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const maybeLoadMoreHorizontal = (projectedScrollLeft?: number) => {
+    if (!hasMoreHorizontal || loadingMoreHorizontal || !onLoadMoreHorizontal) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const scrollLeft = projectedScrollLeft ?? container.scrollLeft;
+    const remaining = container.scrollWidth - scrollLeft - container.clientWidth;
+    if (remaining <= 420) {
+      onLoadMoreHorizontal();
+    }
+  };
 
   const handleScroll = (direction: 'left' | 'right') => {
     if (!scrollContainerRef.current) return;
@@ -42,6 +59,9 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
     const cardWidth = 175; // Approx card width + gap
     const scrollAmount = direction === 'left' ? -cardWidth * 3 : cardWidth * 3;
     container.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    if (direction === 'right') {
+      maybeLoadMoreHorizontal(container.scrollLeft + scrollAmount);
+    }
   };
 
   return (
@@ -111,7 +131,11 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
           <p>{emptyMessage}</p>
         </div>
       ) : (
-        <div className="discovery-row-track" ref={scrollContainerRef}>
+        <div
+          className="discovery-row-track"
+          ref={scrollContainerRef}
+          onScroll={() => maybeLoadMoreHorizontal()}
+        >
           {items.map((movie) => (
             <div key={`${id}-card-${movie.id}`} className="discovery-card-wrapper">
               <ContentCard
@@ -121,6 +145,11 @@ export const DiscoveryRow: React.FC<DiscoveryRowProps> = ({
               />
             </div>
           ))}
+          {loadingMoreHorizontal && (
+            <div className="discovery-card-wrapper" aria-label={`Loading more ${title}`}>
+              <LoadingSkeleton count={2} />
+            </div>
+          )}
         </div>
       )}
     </section>

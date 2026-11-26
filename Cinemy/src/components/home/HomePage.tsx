@@ -31,6 +31,7 @@ import { useLazySection } from '../../hooks/useLazySection';
 
 // Initial horizontal row batch sizes derived from card width (~175px) + smooth scroll buffer
 const INITIAL_DISCOVERY_ROW_LIMIT = 18;
+const FULL_DISCOVERY_ROW_LIMIT = 50;
 const INITIAL_PREVIEW_CATALOG_LIMIT = 36;
 const INITIAL_PREVIEW_DISPLAY_LIMIT = 20;
 
@@ -65,8 +66,12 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [recentlyAddedItems, setRecentlyAddedItems] = useState<MovieItem[]>([]);
   const [recentlyUpgradedItems, setRecentlyUpgradedItems] = useState<MovieItem[]>([]);
   const [trendingItems, setTrendingItems] = useState<MovieItem[]>([]);
+  const [trendingExpanded, setTrendingExpanded] = useState<boolean>(false);
+  const [trendingExpanding, setTrendingExpanding] = useState<boolean>(false);
   const [recommendedItems, setRecommendedItems] = useState<MovieItem[]>([]);
   const [recommendedPersonalized, setRecommendedPersonalized] = useState<boolean>(false);
+  const [evergreenExpanded, setEvergreenExpanded] = useState<boolean>(false);
+  const [evergreenExpanding, setEvergreenExpanding] = useState<boolean>(false);
   const [catalogYears, setCatalogYears] = useState<YearCountItem[]>([]);
   const [olderYearsCount, setOlderYearsCount] = useState<number>(0);
   const [allMoviesPreview, setAllMoviesPreview] = useState<MovieItem[]>([]);
@@ -130,6 +135,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   // Local fallback player target state
   const [internalPlayerTarget, setInternalPlayerTarget] = useState<PlaybackTarget | null>(null);
   const isLoadingMoreRef = useRef(false);
+  const trendingExpandingRef = useRef(false);
+  const evergreenExpandingRef = useRef(false);
   const discoverySeqRef = useRef(0);
   const [discoveryWave, setDiscoveryWave] = useState<number>(0);
   const fetchedSectionsRef = useRef<Set<SectionKey>>(new Set());
@@ -158,6 +165,9 @@ export const HomePage: React.FC<HomePageProps> = ({
       prevUsernameRef.current = username;
       setRecommendedItems([]);
       setRecommendedPersonalized(false);
+      setEvergreenExpanded(false);
+      setEvergreenExpanding(false);
+      evergreenExpandingRef.current = false;
       fetchedSectionsRef.current.delete('evergreen');
       setSectionLoaded((prev) => ({ ...prev, evergreen: false }));
     }
@@ -252,10 +262,17 @@ export const HomePage: React.FC<HomePageProps> = ({
   const fetchTrendingSection = useCallback(async (seq: number) => {
     setSectionLoading((prev) => ({ ...prev, trending: true }));
     setSectionError((prev) => ({ ...prev, trending: null }));
+    setTrendingExpanded(false);
+    setTrendingExpanding(false);
+    trendingExpandingRef.current = false;
     try {
       const trendingRes = await getTrending({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
-      setTrendingItems(trendingRes.items || []);
+      const items = trendingRes.items || [];
+      setTrendingItems(items);
+      if (items.length < INITIAL_DISCOVERY_ROW_LIMIT) {
+        setTrendingExpanded(true);
+      }
       setSectionLoaded((prev) => ({ ...prev, trending: true }));
     } catch (err: any) {
       if (discoverySeqRef.current !== seq) return;
@@ -270,33 +287,73 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   }, []);
 
+  // Progressive horizontal load (18 -> 50) when user scrolls near the right edge of Trending
+  const handleExpandTrending = useCallback(async () => {
+    if (trendingExpanded || trendingExpandingRef.current) return;
+    const seq = discoverySeqRef.current;
+    trendingExpandingRef.current = true;
+    setTrendingExpanding(true);
+    try {
+      const fullRes = await getTrending({ limit: FULL_DISCOVERY_ROW_LIMIT });
+      if (discoverySeqRef.current !== seq) return;
+      const fullItems = fullRes.items || [];
+      setTrendingItems((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const extra = fullItems.filter((m) => !seen.has(m.id));
+        return extra.length > 0 ? [...prev, ...extra] : prev;
+      });
+      setTrendingExpanded(true);
+    } catch {
+      // Keep existing 18 cards intact on expansion error; user can retry by scrolling again
+    } finally {
+      if (discoverySeqRef.current === seq) {
+        setTrendingExpanding(false);
+        trendingExpandingRef.current = false;
+      }
+    }
+  }, [trendingExpanded]);
+
   // Option A: Server-side-only personalization eligibility. Never send device-local seed_ids.
   // If /api/discovery/recommended fails or returns empty, explicitly fall back to /api/discovery/evergreen.
   const fetchEvergreenOrRecommendedSection = useCallback(async (seq: number) => {
     setSectionLoading((prev) => ({ ...prev, evergreen: true }));
     setSectionError((prev) => ({ ...prev, evergreen: null }));
+    setEvergreenExpanded(false);
+    setEvergreenExpanding(false);
+    evergreenExpandingRef.current = false;
     try {
       const recRes = await getRecommended({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
       if (recRes && Array.isArray(recRes.items) && recRes.items.length > 0) {
         setRecommendedItems(recRes.items);
         setRecommendedPersonalized(Boolean(recRes.personalized));
+        if (recRes.items.length < INITIAL_DISCOVERY_ROW_LIMIT) {
+          setEvergreenExpanded(true);
+        }
         setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
         return;
       }
       // Empty response -> fall back to dedicated Evergreen endpoint
       const evRes = await getEvergreen({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
-      setRecommendedItems(evRes.items || []);
+      const evItems = evRes.items || [];
+      setRecommendedItems(evItems);
       setRecommendedPersonalized(false);
+      if (evItems.length < INITIAL_DISCOVERY_ROW_LIMIT) {
+        setEvergreenExpanded(true);
+      }
       setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
     } catch {
       if (discoverySeqRef.current !== seq) return;
       try {
         const evRes = await getEvergreen({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
         if (discoverySeqRef.current !== seq) return;
-        setRecommendedItems(evRes.items || []);
+        const evItems = evRes.items || [];
+        setRecommendedItems(evItems);
         setRecommendedPersonalized(false);
+        if (evItems.length < INITIAL_DISCOVERY_ROW_LIMIT) {
+          setEvergreenExpanded(true);
+        }
         setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
       } catch (evErr: any) {
         if (discoverySeqRef.current !== seq) return;
@@ -312,6 +369,44 @@ export const HomePage: React.FC<HomePageProps> = ({
       }
     }
   }, []);
+
+  // Progressive horizontal load (18 -> 50) when user scrolls near the right edge of Evergreen / Recommended
+  const handleExpandEvergreen = useCallback(async () => {
+    if (evergreenExpanded || evergreenExpandingRef.current) return;
+    const seq = discoverySeqRef.current;
+    evergreenExpandingRef.current = true;
+    setEvergreenExpanding(true);
+    try {
+      let fullItems: MovieItem[] = [];
+      try {
+        const recRes = await getRecommended({ limit: FULL_DISCOVERY_ROW_LIMIT });
+        if (discoverySeqRef.current !== seq) return;
+        if (recRes && Array.isArray(recRes.items) && recRes.items.length > 0) {
+          fullItems = recRes.items;
+        }
+      } catch {
+        // Fall through to Evergreen fallback below
+      }
+      if (fullItems.length === 0) {
+        const evRes = await getEvergreen({ limit: FULL_DISCOVERY_ROW_LIMIT });
+        if (discoverySeqRef.current !== seq) return;
+        fullItems = evRes.items || [];
+      }
+      setRecommendedItems((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const extra = fullItems.filter((m) => !seen.has(m.id));
+        return extra.length > 0 ? [...prev, ...extra] : prev;
+      });
+      setEvergreenExpanded(true);
+    } catch {
+      // Keep existing 18 cards intact on expansion error
+    } finally {
+      if (discoverySeqRef.current === seq) {
+        setEvergreenExpanding(false);
+        evergreenExpandingRef.current = false;
+      }
+    }
+  }, [evergreenExpanded]);
 
   const fetchRecentlyUpgradedSection = useCallback(
     async (seq: number) => {
@@ -800,7 +895,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               />
             )}
 
-            {/* Section 3: Trending Now (Priority 2 — lazy-loaded on viewport approach) */}
+            {/* Section 3: Trending Now (Priority 2 — lazy-loaded on viewport approach, expands 18 -> 50 on right scroll) */}
             <div ref={trendingLazy.ref} data-lazy-section="trending">
               {(!sectionLoaded.trending || sectionLoading.trending || Boolean(sectionError.trending) || trendingItems.length > 0) && (
                 <DiscoveryRow
@@ -812,11 +907,14 @@ export const HomePage: React.FC<HomePageProps> = ({
                   error={sectionError.trending}
                   onRetry={() => void fetchTrendingSection(discoverySeqRef.current)}
                   onSelectMovie={handleCardClick}
+                  hasMoreHorizontal={!trendingExpanded && trendingItems.length >= INITIAL_DISCOVERY_ROW_LIMIT}
+                  loadingMoreHorizontal={trendingExpanding}
+                  onLoadMoreHorizontal={() => void handleExpandTrending()}
                 />
               )}
             </div>
 
-            {/* Section 4: Evergreen Picks / Recommended for You (Priority 2 — lazy-loaded on viewport approach) */}
+            {/* Section 4: Evergreen Picks / Recommended for You (Priority 2 — lazy-loaded, expands 18 -> 50 on right scroll) */}
             <div ref={evergreenLazy.ref} data-lazy-section="evergreen">
               {(!sectionLoaded.evergreen || sectionLoading.evergreen || Boolean(sectionError.evergreen) || recommendedItems.length > 0) && (
                 <DiscoveryRow
@@ -828,6 +926,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                   error={sectionError.evergreen}
                   onRetry={() => void fetchEvergreenOrRecommendedSection(discoverySeqRef.current)}
                   onSelectMovie={handleCardClick}
+                  hasMoreHorizontal={!evergreenExpanded && recommendedItems.length >= INITIAL_DISCOVERY_ROW_LIMIT}
+                  loadingMoreHorizontal={evergreenExpanding}
+                  onLoadMoreHorizontal={() => void handleExpandEvergreen()}
                 />
               )}
             </div>

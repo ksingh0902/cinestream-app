@@ -9,13 +9,15 @@ Supports:
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import sqlite3
 import threading
 import time
 from collections import defaultdict
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 from ..api.routes_catalog import (
     ADULT_EXCLUSION_SQL,
@@ -30,6 +32,42 @@ TRENDING_CACHE_TTL = 120.0
 TRENDING_CACHE_MAX = 32
 DEFAULT_TRENDING_LIMIT = 50
 MAX_TRENDING_LIMIT = 50
+
+_IST_FALLBACK_TZ = timezone(timedelta(hours=5, minutes=30))
+try:
+    from zoneinfo import ZoneInfo
+
+    _KOLKATA_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    _KOLKATA_TZ = _IST_FALLBACK_TZ
+
+# Repeating 10-slot pattern: 50% core strong, 30% rising discovery, 20% controlled daily rotation
+_DAILY_TIER_PATTERN = (
+    "core",
+    "core",
+    "rising",
+    "core",
+    "rotation",
+    "rising",
+    "core",
+    "core",
+    "rising",
+    "rotation",
+)
+
+
+def get_trending_day_key(date_override: Optional[str] = None) -> str:
+    """Return the canonical YYYY-MM-DD calendar date in Asia/Kolkata for daily rotation."""
+    if date_override and str(date_override).strip():
+        return str(date_override).strip()
+    return datetime.now(_KOLKATA_TZ).strftime("%Y-%m-%d")
+
+
+def _daily_rotation_unit(day_key: str, canonical_key: tuple[str, str, int]) -> float:
+    """Return a deterministic float in [0.0, 1.0) seeded by Asia/Kolkata calendar date + canonical title."""
+    seed_str = f"cinemy-trending:{day_key}:{canonical_key[0]}|{canonical_key[1]}|{canonical_key[2]}"
+    digest = hashlib.sha256(seed_str.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 ANIMATION_EXCLUSION_SQL = (
     "LOWER(COALESCE(genres, '')) NOT LIKE '%animation%' "
@@ -213,16 +251,99 @@ def _fallback_trending_score(row: dict[str, Any], mirror_count: int, now_ts: int
     return round(rating_pts + year_pts + q_score + upgrade_pts + mirror_pts + src_pts, 4)
 
 
+def _apply_daily_rotation(
+    ranked_entries: list[tuple[float, int, tuple[str, str, int], dict[str, Any]]],
+    limit: int,
+    day_key: str,
+) -> list[tuple[float, int, tuple[str, str, int], dict[str, Any]]]:
+    """
+    Apply deterministic daily rotation over base-ranked deduplicated candidates:
+      - ~50% core strong candidates (top relevance band with gentle daily order rotation)
+      - ~30% rising discovery candidates (mid relevance band with stronger daily rotation)
+      - ~20% controlled freshness candidates (remaining qualified pool)
+    Fully reproducible for a given Asia/Kolkata YYYY-MM-DD date; never uses random().
+    """
+    n = len(ranked_entries)
+    if n <= 1 or limit <= 0:
+        return ranked_entries[:limit]
+
+    core_quota = max(1, round(limit * 0.50))
+    rising_quota = round(limit * 0.30)
+
+    core_pool_end = min(n, max(core_quota * 2, min(n, 40)))
+    rising_pool_end = min(n, max(core_pool_end + rising_quota * 3, min(n, 140)))
+
+    core_pool = ranked_entries[:core_pool_end]
+    rising_pool = ranked_entries[core_pool_end:rising_pool_end]
+    rotation_pool = ranked_entries[rising_pool_end:]
+
+    core_ranked = sorted(
+        core_pool,
+        key=lambda e: (
+            -(e[0] + (_daily_rotation_unit(day_key, e[2]) - 0.5) * 8.0),
+            e[1],
+            -(int(e[3].get("id") or 0)),
+        ),
+    )
+    rising_ranked = sorted(
+        rising_pool,
+        key=lambda e: (
+            -(e[0] + _daily_rotation_unit(day_key, e[2]) * 16.0),
+            e[1],
+            -(int(e[3].get("id") or 0)),
+        ),
+    )
+    rotation_ranked = sorted(
+        rotation_pool,
+        key=lambda e: (
+            -(e[0] * 0.35 + _daily_rotation_unit(day_key, e[2]) * 32.0),
+            e[1],
+            -(int(e[3].get("id") or 0)),
+        ),
+    )
+
+    queues: dict[str, list[tuple[float, int, tuple[str, str, int], dict[str, Any]]]] = {
+        "core": core_ranked,
+        "rising": rising_ranked,
+        "rotation": rotation_ranked,
+    }
+    cursors = {"core": 0, "rising": 0, "rotation": 0}
+    fallback_order = ("core", "rising", "rotation")
+
+    selected: list[tuple[float, int, tuple[str, str, int], dict[str, Any]]] = []
+    slot = 0
+    while len(selected) < limit:
+        preferred = _DAILY_TIER_PATTERN[slot % len(_DAILY_TIER_PATTERN)]
+        slot += 1
+        picked = None
+        if cursors[preferred] < len(queues[preferred]):
+            picked = queues[preferred][cursors[preferred]]
+            cursors[preferred] += 1
+        else:
+            for alt in fallback_order:
+                if cursors[alt] < len(queues[alt]):
+                    picked = queues[alt][cursors[alt]]
+                    cursors[alt] += 1
+                    break
+        if picked is None:
+            break
+        selected.append(picked)
+
+    return selected
+
+
 def _deduplicate_and_rank(
     scored_rows: list[tuple[float, dict[str, Any]]],
     limit: int,
+    day_key: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """
     Deduplicate across yomovies/dooflix/ask4movie/movies7 by canonical normalized (title, year, is_series).
     Prefers higher score, breaking close ties by established CINEMY source priority.
     Excludes animated titles via catalogue metadata.
+    When `day_key` is provided, applies deterministic daily rotation over the base-ranked pool.
     """
-    dedup: dict[tuple[str, str, int], tuple[float, int, dict[str, Any]]] = {}
+    dedup: dict[tuple[str, str, int], tuple[float, int, tuple[str, str, int], dict[str, Any]]] = {}
     for score, row in scored_rows:
         if _is_animated_row(row):
             continue
@@ -236,35 +357,56 @@ def _deduplicate_and_rank(
 
         existing = dedup.get(key)
         if existing is None:
-            dedup[key] = (score, prio, row)
+            dedup[key] = (score, prio, key, row)
         else:
-            prev_score, prev_prio, _ = existing
+            prev_score, prev_prio, _, _ = existing
             if score > prev_score + 1.5 or (abs(score - prev_score) <= 1.5 and prio < prev_prio):
-                dedup[key] = (max(score, prev_score), min(prio, prev_prio), row)
+                dedup[key] = (max(score, prev_score), min(prio, prev_prio), key, row)
 
     ordered = sorted(
         dedup.values(),
-        key=lambda e: (-e[0], e[1], -(int(e[2].get("id") or 0))),
+        key=lambda e: (-e[0], e[1], -(int(e[3].get("id") or 0))),
     )
-    return [_format_row(row) for _, _, row in ordered[:limit]]
+    if day_key:
+        ordered = _apply_daily_rotation(ordered, limit=limit, day_key=day_key)
+    else:
+        ordered = ordered[:limit]
+    return [_format_row(row) for _, _, _, row in ordered]
 
 
-def get_trending_titles(limit: int = DEFAULT_TRENDING_LIMIT, window_days: int = 14) -> dict[str, Any]:
-    """Return bounded Trending Now items (8-12 default, max 20), cached globally for 120s."""
+def get_trending_titles(
+    limit: int = DEFAULT_TRENDING_LIMIT,
+    window_days: int = 14,
+    *,
+    date_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Return bounded daily-rotating Trending Now items (1..50), cached per Asia/Kolkata day for 120s.
+    Always computes and caches the full 50-title daily pool first, then slices `[:limit]` so
+    `limit=18` is always identical to the first 18 titles of `limit=50` (seamless 18 -> 50 expansion).
+    """
     limit = min(MAX_TRENDING_LIMIT, max(1, int(limit)))
     window_days = min(90, max(1, int(window_days)))
-    cache_key = (limit, window_days)
+    day_key = get_trending_day_key(date_key)
+    cache_key = (window_days, day_key)
 
     now_mono = time.monotonic()
     with _trending_cache_lock:
         cached = _trending_cache.get(cache_key)
         if cached and (now_mono - cached[0] < TRENDING_CACHE_TTL):
-            return cached[1]
+            sliced = cached[1]["items"][:limit]
+            return {
+                "items": sliced,
+                "total": len(sliced),
+                "mode": cached[1]["mode"],
+                "is_fallback": cached[1]["is_fallback"],
+            }
 
     now_ts = int(time.time())
     mode = "fallback_trending"
     is_fallback = True
     items: list[dict[str, Any]] = []
+    pool_limit = MAX_TRENDING_LIMIT
 
     with get_db_connection() as conn:
         # 1. Try real aggregate activity signals if viewer_activity exists
@@ -274,7 +416,7 @@ def get_trending_titles(limit: int = DEFAULT_TRENDING_LIMIT, window_days: int = 
 
         if activity_scores:
             top_ids = [
-                mid for mid, _ in sorted(activity_scores.items(), key=lambda kv: -kv[1])[: limit * 4]
+                mid for mid, _ in sorted(activity_scores.items(), key=lambda kv: -kv[1])[: pool_limit * 4]
             ]
             placeholders = ",".join("?" for _ in top_ids)
             rows = conn.execute(
@@ -289,13 +431,13 @@ def get_trending_titles(limit: int = DEFAULT_TRENDING_LIMIT, window_days: int = 
                 top_ids,
             ).fetchall()
             scored_act = [(activity_scores[int(r["id"])], dict(r)) for r in rows]
-            items = _deduplicate_and_rank(scored_act, limit=limit)
+            items = _deduplicate_and_rank(scored_act, limit=pool_limit)
             if len(items) >= min(limit, 4):
                 mode = "activity"
                 is_fallback = False
 
         # 2. Deterministic fallback trending using verified catalogue signals (bounded query <= 450 rows)
-        if len(items) < limit:
+        if len(items) < pool_limit:
             existing_keys = {
                 (_normalized_title(m.get("title")), str(m.get("year") or "").strip(), 1 if m.get("is_series") else 0)
                 for m in items
@@ -336,13 +478,13 @@ def get_trending_titles(limit: int = DEFAULT_TRENDING_LIMIT, window_days: int = 
                 mc = mirror_counts[(nt, yr)]
                 scored_fb.append((_fallback_trending_score(d, mc, now_ts), d))
 
-            needed = limit - len(items)
-            fb_items = _deduplicate_and_rank(scored_fb, limit=needed)
+            needed = pool_limit - len(items)
+            fb_items = _deduplicate_and_rank(scored_fb, limit=needed, day_key=day_key)
             items.extend(fb_items)
 
-    result = {
-        "items": items[:limit],
-        "total": len(items[:limit]),
+    full_result = {
+        "items": items[:pool_limit],
+        "total": len(items[:pool_limit]),
         "mode": mode,
         "is_fallback": is_fallback,
     }
@@ -351,6 +493,12 @@ def get_trending_titles(limit: int = DEFAULT_TRENDING_LIMIT, window_days: int = 
         if len(_trending_cache) >= TRENDING_CACHE_MAX:
             oldest = min(_trending_cache, key=lambda k: _trending_cache[k][0])
             _trending_cache.pop(oldest, None)
-        _trending_cache[cache_key] = (now_mono, result)
+        _trending_cache[cache_key] = (now_mono, full_result)
 
-    return result
+    sliced = full_result["items"][:limit]
+    return {
+        "items": sliced,
+        "total": len(sliced),
+        "mode": mode,
+        "is_fallback": is_fallback,
+    }
