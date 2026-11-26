@@ -1797,3 +1797,38 @@
   background: var(--dim);
 }
 
+
+/* Priority 0 Immediate Hero Skeleton (prevents layout shift while Priority 1 loads) */
+.hero-skeleton {
+  min-height: 420px;
+  display: flex;
+  align-items: flex-end;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.015) 100%);
+}
+.hero-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 40px 0;
+  max-width: 520px;
+}
+.hero-skeleton-pill {
+  width: 140px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.hero-skeleton-title {
+  width: 360px;
+  max-width: 80vw;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.09);
+}
+.hero-skeleton-desc {
+  width: 460px;
+  max-width: 85vw;
+  height: 18px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}

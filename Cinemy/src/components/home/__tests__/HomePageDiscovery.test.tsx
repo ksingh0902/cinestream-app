@@ -11,6 +11,20 @@ vi.mock('../../../router', () => ({
   useRouter: () => ({ navigate: mockNavigate }),
 }));
 
+let mockAuthUsername: string | null = 'viewer';
+vi.mock('../../../context/AuthContext', () => ({
+  useAuth: () => ({
+    authenticated: Boolean(mockAuthUsername),
+    username: mockAuthUsername,
+    role: 'viewer',
+    loading: false,
+    error: null,
+    isStorageOutage: false,
+    refreshAuth: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
+
 vi.mock('../../../features/watchlist', () => ({
   useWatchlist: () => ({
     items: [{ id: 999, title: 'Saved On WAP' }],
@@ -67,6 +81,9 @@ vi.mock('../../../api/catalogue', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuthUsername = 'viewer';
+  delete (window as any).IntersectionObserver;
+  delete (globalThis as any).IntersectionObserver;
   if (!window.matchMedia) {
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -138,13 +155,13 @@ describe('Workstream A & B: Cross-Platform Discovery Consistency + Independent L
 
     // Must never send device-local seed_ids from watchlist/continue-watching
     expect(mockGetRecommended).toHaveBeenCalledTimes(1);
-    expect(mockGetRecommended).toHaveBeenCalledWith({ limit: 50 });
+    expect(mockGetRecommended).toHaveBeenCalledWith({ limit: 18 });
     expect(mockGetTrending).toHaveBeenCalledTimes(1);
-    expect(mockGetTrending).toHaveBeenCalledWith({ limit: 50 });
+    expect(mockGetTrending).toHaveBeenCalledWith({ limit: 18 });
     expect(mockGetRecentlyAdded).toHaveBeenCalledTimes(1);
   });
 
-  it('2. Recommended API failure gracefully falls back to GET /api/discovery/evergreen?limit=50', async () => {
+  it('2. Recommended API failure gracefully falls back to GET /api/discovery/evergreen?limit=18', async () => {
     mockGetRecommended.mockRejectedValueOnce(new Error('500 Internal Server Error'));
 
     render(
@@ -159,7 +176,7 @@ describe('Workstream A & B: Cross-Platform Discovery Consistency + Independent L
       expect(screen.getByText('Evergreen Picks')).toBeDefined();
       expect(screen.getByText('Direct Evergreen Fallback')).toBeDefined();
     });
-    expect(mockGetEvergreen).toHaveBeenCalledWith({ limit: 50 });
+    expect(mockGetEvergreen).toHaveBeenCalledWith({ limit: 18 });
   });
 
   it('3. Independent loading: Trending failure does not block Recently Added, Evergreen Picks, Movies, or Series', async () => {
@@ -299,7 +316,7 @@ describe('Recently Added: 5x15 See-All Grid + Source Priority Pagination', () =>
     // Homepage Recently Added stays a limited horizontal row
     await waitFor(() => {
       expect(mockGetRecentlyAdded).toHaveBeenCalledWith({
-        limit: 30,
+        limit: 18,
         window_months: 3,
         latest_crawl: true,
       });
@@ -381,5 +398,185 @@ describe('Recently Added: 5x15 See-All Grid + Source Priority Pagination', () =>
       expect(container.querySelectorAll('.content-grid--five-col .content-card').length).toBe(75);
     });
     expect(screen.queryByRole('button', { name: 'Load more movies and series' })).toBeNull();
+  });
+});
+
+describe('Progressive Home Lazy Loading (IntersectionObserver)', () => {
+  type IOCallback = (entries: Array<{ isIntersecting: boolean; target: Element }>) => void;
+  let observedMap: Map<Element, { cb: IOCallback; disconnect: ReturnType<typeof vi.fn> }>;
+
+  function installMockIntersectionObserver() {
+    observedMap = new Map();
+    class MockIntersectionObserver {
+      private cb: IOCallback;
+      disconnect = vi.fn();
+      constructor(cb: IOCallback) {
+        this.cb = cb;
+      }
+      observe(el: Element) {
+        observedMap.set(el, { cb: this.cb, disconnect: this.disconnect });
+      }
+      unobserve() {}
+    }
+    (window as any).IntersectionObserver = MockIntersectionObserver;
+    (globalThis as any).IntersectionObserver = MockIntersectionObserver;
+  }
+
+  function triggerIntersection(sectionName: string, isIntersecting: boolean) {
+    for (const [el, entry] of observedMap.entries()) {
+      if (el.getAttribute('data-lazy-section') === sectionName) {
+        entry.cb([{ isIntersecting, target: el }]);
+      }
+    }
+  }
+
+  it('1. Initial Home only fetches Priority 1 (Recently Added + Preferences) and does NOT fetch below-the-fold sections', async () => {
+    installMockIntersectionObserver();
+
+    render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Recent Film').length).toBeGreaterThan(0);
+    });
+
+    expect(mockGetRecentlyAdded).toHaveBeenCalledTimes(1);
+    expect(mockGetRecentlyAdded).toHaveBeenCalledWith({
+      limit: 18,
+      window_months: 3,
+      latest_crawl: true,
+    });
+    expect(mockGetHomepagePreferences).toHaveBeenCalledTimes(1);
+
+    // Below-the-fold sections MUST NOT be fetched on initial mount
+    expect(mockGetTrending).not.toHaveBeenCalled();
+    expect(mockGetRecommended).not.toHaveBeenCalled();
+    expect(mockGetEvergreen).not.toHaveBeenCalled();
+    expect(mockGetRecentlyUpgraded).not.toHaveBeenCalled();
+    expect(mockGetCatalogYears).not.toHaveBeenCalled();
+    expect(mockGetMovies).not.toHaveBeenCalled();
+  });
+
+  it('2. Approaching a lazy section triggers exactly ONE request and re-entry does NOT duplicate', async () => {
+    installMockIntersectionObserver();
+
+    render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Recent Film').length).toBeGreaterThan(0);
+    });
+
+    // Approach Trending -> fetches once
+    triggerIntersection('trending', true);
+    await waitFor(() => {
+      expect(screen.getByText('Trending Film')).toBeDefined();
+    });
+    expect(mockGetTrending).toHaveBeenCalledTimes(1);
+    expect(mockGetTrending).toHaveBeenCalledWith({ limit: 18 });
+
+    // Scroll away and re-enter -> MUST NOT fire again
+    triggerIntersection('trending', false);
+    triggerIntersection('trending', true);
+    expect(mockGetTrending).toHaveBeenCalledTimes(1);
+
+    // Approach Movies -> fetches per_page=36 once (not 80)
+    triggerIntersection('movies', true);
+    await waitFor(() => {
+      expect(screen.getByText('Sample Movie')).toBeDefined();
+    });
+    expect(mockGetMovies).toHaveBeenCalledTimes(1);
+    expect(mockGetMovies).toHaveBeenCalledWith({ per_page: 36, series: 0, sort: 'recent' });
+  });
+
+  it('3. Failed lazy section shows Retry without blocking other lazy sections', async () => {
+    installMockIntersectionObserver();
+    mockGetTrending.mockRejectedValueOnce(new Error('Trending timeout'));
+
+    render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Recent Film').length).toBeGreaterThan(0);
+    });
+
+    triggerIntersection('trending', true);
+    triggerIntersection('evergreen', true);
+
+    await waitFor(() => {
+      expect(screen.getByText('Trending timeout')).toBeDefined();
+      expect(screen.getByText('Evergreen Classic')).toBeDefined();
+    });
+
+    mockGetTrending.mockResolvedValueOnce({
+      items: [mockMovie(99, 'Trending Recovered')],
+      total: 1,
+      mode: 'fallback_trending',
+      is_fallback: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(screen.getByText('Trending Recovered')).toBeDefined();
+    });
+  });
+
+  it('4. Viewer change clears personalized Recommended state so data never leaks across viewers', async () => {
+    installMockIntersectionObserver();
+    mockGetRecommended.mockResolvedValueOnce({
+      items: [mockMovie(301, 'Viewer A Rec')],
+      total: 1,
+      personalized: true,
+      mode: 'personalized',
+    });
+
+    const { rerender } = render(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    triggerIntersection('evergreen', true);
+    await waitFor(() => {
+      expect(screen.getByText('Viewer A Rec')).toBeDefined();
+    });
+
+    // Switch authenticated viewer to Viewer B (same mounted HomePage, no manual reset needed)
+    mockAuthUsername = 'viewer_b';
+    mockGetRecommended.mockResolvedValueOnce({
+      items: [mockMovie(302, 'Viewer B Rec')],
+      total: 1,
+      personalized: true,
+      mode: 'personalized',
+    });
+
+    rerender(
+      <HomePage
+        activeCategory={{ category: 'all' }}
+        onResetCategory={vi.fn()}
+        onSelectCategory={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Viewer B Rec')).toBeDefined();
+    });
+    expect(screen.queryByText('Viewer A Rec')).toBeNull();
   });
 });

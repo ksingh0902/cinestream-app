@@ -12,11 +12,28 @@ import {
   YearsResponse,
 } from '../types/catalogue';
 
+const STATIC_META_TTL_MS = 60_000;
+const staticMetaCache = new Map<string, { expiresAt: number; promise: Promise<any> }>();
+
+function cachedStaticGet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = staticMetaCache.get(key);
+  if (hit && hit.expiresAt > now) {
+    return hit.promise as Promise<T>;
+  }
+  const promise = fetcher().catch((err) => {
+    staticMetaCache.delete(key);
+    throw err;
+  });
+  staticMetaCache.set(key, { expiresAt: now + STATIC_META_TTL_MS, promise });
+  return promise;
+}
+
 /**
- * Fetches the static list of supported genres from GET /api/genres
+ * Fetches the static list of supported genres from GET /api/genres (deduped & cached 60s)
  */
 export async function getGenres(): Promise<string[]> {
-  return apiClient.get<string[]>('/api/genres');
+  return cachedStaticGet('genres', () => apiClient.get<string[]>('/api/genres'));
 }
 
 /**
@@ -114,17 +131,17 @@ export async function getRecommended(params: {
 }
 
 /**
- * Release year metadata and title counts (GET /api/catalog/years)
+ * Release year metadata and title counts (GET /api/catalog/years, deduped & cached 60s)
  */
 export async function getCatalogYears(): Promise<YearsResponse> {
-  return apiClient.get<YearsResponse>('/api/catalog/years');
+  return cachedStaticGet('catalog-years', () => apiClient.get<YearsResponse>('/api/catalog/years'));
 }
 
 /**
- * Homepage discovery section preferences (GET /api/homepage/preferences)
+ * Homepage discovery section preferences (GET /api/homepage/preferences, deduped & cached 60s)
  */
 export async function getHomepagePreferences(): Promise<HomepagePreferences> {
-  return apiClient.get<HomepagePreferences>('/api/homepage/preferences');
+  return cachedStaticGet('homepage-preferences', () => apiClient.get<HomepagePreferences>('/api/homepage/preferences'));
 }
 
 /**

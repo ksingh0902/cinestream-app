@@ -26,6 +26,13 @@ import { ErrorBanner } from '../common/ErrorBanner';
 import { PlaybackTarget, PlayerModal } from '../../features/player';
 import { useRouter } from '../../router';
 import { useWatchlist } from '../../features/watchlist';
+import { useAuth } from '../../context/AuthContext';
+import { useLazySection } from '../../hooks/useLazySection';
+
+// Initial horizontal row batch sizes derived from card width (~175px) + smooth scroll buffer
+const INITIAL_DISCOVERY_ROW_LIMIT = 18;
+const INITIAL_PREVIEW_CATALOG_LIMIT = 36;
+const INITIAL_PREVIEW_DISPLAY_LIMIT = 20;
 
 interface HomePageProps {
   activeCategory: CategorySelection;
@@ -42,6 +49,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 }) => {
   const { navigate } = useRouter();
   const { isInList, addItem, removeItem } = useWatchlist();
+  const { username } = useAuth();
 
   // Admin display preferences
   const [preferences, setPreferences] = useState<HomepagePreferences>({
@@ -66,15 +74,16 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [heroItems, setHeroItems] = useState<MovieItem[]>([]);
 
   // Independent per-section loading & error states (no all-or-nothing Promise.all gate)
+  // Priority 1 (recentlyAdded) starts loading immediately; Priority 2 sections load lazily on approach.
   type SectionKey = 'recentlyAdded' | 'trending' | 'evergreen' | 'recentlyUpgraded' | 'movies' | 'series' | 'years';
   const [sectionLoading, setSectionLoading] = useState<Record<SectionKey, boolean>>({
     recentlyAdded: true,
-    trending: true,
-    evergreen: true,
-    recentlyUpgraded: true,
-    movies: true,
-    series: true,
-    years: true,
+    trending: false,
+    evergreen: false,
+    recentlyUpgraded: false,
+    movies: false,
+    series: false,
+    years: false,
   });
   const [sectionError, setSectionError] = useState<Record<SectionKey, string | null>>({
     recentlyAdded: null,
@@ -84,6 +93,15 @@ export const HomePage: React.FC<HomePageProps> = ({
     movies: null,
     series: null,
     years: null,
+  });
+  const [sectionLoaded, setSectionLoaded] = useState<Record<SectionKey, boolean>>({
+    recentlyAdded: false,
+    trending: false,
+    evergreen: false,
+    recentlyUpgraded: false,
+    movies: false,
+    series: false,
+    years: false,
   });
 
   // Filtered catalogue grid state (for category tabs, search, filters, or See All)
@@ -113,6 +131,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [internalPlayerTarget, setInternalPlayerTarget] = useState<PlaybackTarget | null>(null);
   const isLoadingMoreRef = useRef(false);
   const discoverySeqRef = useRef(0);
+  const [discoveryWave, setDiscoveryWave] = useState<number>(0);
+  const fetchedSectionsRef = useRef<Set<SectionKey>>(new Set());
   const recentAddedRef = useRef<MovieItem[]>([]);
   const rawMoviesRef = useRef<MovieItem[]>([]);
   const rawSeriesRef = useRef<MovieItem[]>([]);
@@ -121,6 +141,27 @@ export const HomePage: React.FC<HomePageProps> = ({
   const isFilteredCategory = Boolean(
     activeCategory.category !== 'all' || activeCategory.genre
   );
+  const isDiscoveryActive = viewMode === 'discovery' && !isFilteredCategory;
+
+  // Priority 2: IntersectionObserver triggers for below-the-fold sections (preload 300px ahead)
+  const trendingLazy = useLazySection({ enabled: isDiscoveryActive });
+  const evergreenLazy = useLazySection({ enabled: isDiscoveryActive });
+  const upgradedLazy = useLazySection({ enabled: isDiscoveryActive && preferences.recently_upgraded_enabled });
+  const yearsLazy = useLazySection({ enabled: isDiscoveryActive });
+  const moviesLazy = useLazySection({ enabled: isDiscoveryActive });
+  const seriesLazy = useLazySection({ enabled: isDiscoveryActive });
+
+  // Viewer-identity isolation: clear personalized recommendations when active viewer changes
+  const prevUsernameRef = useRef<string | null | undefined>(username);
+  useEffect(() => {
+    if (prevUsernameRef.current !== username) {
+      prevUsernameRef.current = username;
+      setRecommendedItems([]);
+      setRecommendedPersonalized(false);
+      fetchedSectionsRef.current.delete('evergreen');
+      setSectionLoaded((prev) => ({ ...prev, evergreen: false }));
+    }
+  }, [username]);
 
   // Fetch preferences once without triggering duplicate waves when defaults match
   useEffect(() => {
@@ -157,14 +198,14 @@ export const HomePage: React.FC<HomePageProps> = ({
     if (rawMoviesRef.current.length > 0) {
       const moviesPreview = rawMoviesRef.current
         .filter((m) => !addedIds.has(m.id) && !addedTitles.has((m.title || '').toLowerCase().replace(/\s*[\[(]\s*(?:19|20)\d{2}\s*[\])]/g, '').trim()))
-        .slice(0, 30);
+        .slice(0, INITIAL_PREVIEW_DISPLAY_LIMIT);
       setAllMoviesPreview(moviesPreview);
     }
 
     if (rawSeriesRef.current.length > 0) {
       const seriesPreview = rawSeriesRef.current
         .filter((m) => !addedIds.has(m.id) && !addedTitles.has((m.title || '').toLowerCase().replace(/\s*[\[(]\s*(?:19|20)\d{2}\s*[\])]/g, '').trim()))
-        .slice(0, 30);
+        .slice(0, INITIAL_PREVIEW_DISPLAY_LIMIT);
       setAllSeriesPreview(seriesPreview);
     }
 
@@ -183,7 +224,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       setSectionError((prev) => ({ ...prev, recentlyAdded: null }));
       try {
         const addedRes = await getRecentlyAdded({
-          limit: 30,
+          limit: INITIAL_DISCOVERY_ROW_LIMIT,
           window_months: preferences.recently_added_window_months,
           latest_crawl: true,
         });
@@ -191,6 +232,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         const items = addedRes.items || [];
         recentAddedRef.current = items;
         setRecentlyAddedItems(items);
+        setSectionLoaded((prev) => ({ ...prev, recentlyAdded: true }));
         recomputeDerivedPreviews();
       } catch (err: any) {
         if (discoverySeqRef.current !== seq) return;
@@ -211,9 +253,10 @@ export const HomePage: React.FC<HomePageProps> = ({
     setSectionLoading((prev) => ({ ...prev, trending: true }));
     setSectionError((prev) => ({ ...prev, trending: null }));
     try {
-      const trendingRes = await getTrending({ limit: 50 });
+      const trendingRes = await getTrending({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
       setTrendingItems(trendingRes.items || []);
+      setSectionLoaded((prev) => ({ ...prev, trending: true }));
     } catch (err: any) {
       if (discoverySeqRef.current !== seq) return;
       setSectionError((prev) => ({
@@ -228,30 +271,33 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, []);
 
   // Option A: Server-side-only personalization eligibility. Never send device-local seed_ids.
-  // If /api/discovery/recommended fails or returns empty, explicitly fall back to /api/discovery/evergreen?limit=50.
+  // If /api/discovery/recommended fails or returns empty, explicitly fall back to /api/discovery/evergreen.
   const fetchEvergreenOrRecommendedSection = useCallback(async (seq: number) => {
     setSectionLoading((prev) => ({ ...prev, evergreen: true }));
     setSectionError((prev) => ({ ...prev, evergreen: null }));
     try {
-      const recRes = await getRecommended({ limit: 50 });
+      const recRes = await getRecommended({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
       if (recRes && Array.isArray(recRes.items) && recRes.items.length > 0) {
         setRecommendedItems(recRes.items);
         setRecommendedPersonalized(Boolean(recRes.personalized));
+        setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
         return;
       }
       // Empty response -> fall back to dedicated Evergreen endpoint
-      const evRes = await getEvergreen({ limit: 50 });
+      const evRes = await getEvergreen({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
       if (discoverySeqRef.current !== seq) return;
       setRecommendedItems(evRes.items || []);
       setRecommendedPersonalized(false);
+      setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
     } catch {
       if (discoverySeqRef.current !== seq) return;
       try {
-        const evRes = await getEvergreen({ limit: 50 });
+        const evRes = await getEvergreen({ limit: INITIAL_DISCOVERY_ROW_LIMIT });
         if (discoverySeqRef.current !== seq) return;
         setRecommendedItems(evRes.items || []);
         setRecommendedPersonalized(false);
+        setSectionLoaded((prev) => ({ ...prev, evergreen: true }));
       } catch (evErr: any) {
         if (discoverySeqRef.current !== seq) return;
         setRecommendedPersonalized(false);
@@ -273,11 +319,12 @@ export const HomePage: React.FC<HomePageProps> = ({
       setSectionError((prev) => ({ ...prev, recentlyUpgraded: null }));
       try {
         const upgradedRes = await getRecentlyUpgraded({
-          limit: 30,
+          limit: INITIAL_DISCOVERY_ROW_LIMIT,
           window_months: preferences.recently_upgraded_window_months,
         });
         if (discoverySeqRef.current !== seq) return;
         setRecentlyUpgradedItems(upgradedRes.items || []);
+        setSectionLoaded((prev) => ({ ...prev, recentlyUpgraded: true }));
       } catch (err: any) {
         if (discoverySeqRef.current !== seq) return;
         setSectionError((prev) => ({
@@ -298,9 +345,10 @@ export const HomePage: React.FC<HomePageProps> = ({
       setSectionLoading((prev) => ({ ...prev, movies: true }));
       setSectionError((prev) => ({ ...prev, movies: null }));
       try {
-        const moviesRes = await getMovies({ per_page: 80, series: 0, sort: 'recent' });
+        const moviesRes = await getMovies({ per_page: INITIAL_PREVIEW_CATALOG_LIMIT, series: 0, sort: 'recent' });
         if (discoverySeqRef.current !== seq) return;
         rawMoviesRef.current = moviesRes.items || [];
+        setSectionLoaded((prev) => ({ ...prev, movies: true }));
         recomputeDerivedPreviews();
       } catch (err: any) {
         if (discoverySeqRef.current !== seq) return;
@@ -322,9 +370,10 @@ export const HomePage: React.FC<HomePageProps> = ({
       setSectionLoading((prev) => ({ ...prev, series: true }));
       setSectionError((prev) => ({ ...prev, series: null }));
       try {
-        const seriesRes = await getMovies({ per_page: 80, series: 1, sort: 'recent' });
+        const seriesRes = await getMovies({ per_page: INITIAL_PREVIEW_CATALOG_LIMIT, series: 1, sort: 'recent' });
         if (discoverySeqRef.current !== seq) return;
         rawSeriesRef.current = seriesRes.items || [];
+        setSectionLoaded((prev) => ({ ...prev, series: true }));
         recomputeDerivedPreviews();
       } catch (err: any) {
         if (discoverySeqRef.current !== seq) return;
@@ -349,6 +398,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       if (discoverySeqRef.current !== seq) return;
       setCatalogYears(yearsRes.years || []);
       setOlderYearsCount(yearsRes.older_count || 0);
+      setSectionLoaded((prev) => ({ ...prev, years: true }));
     } catch {
       if (discoverySeqRef.current !== seq) return;
       setSectionError((prev) => ({ ...prev, years: 'Unable to load release years.' }));
@@ -359,28 +409,65 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   }, []);
 
-  // Launch all discovery homepage sections independently (no all-or-nothing Promise.all gate)
+  // Priority 1: On initial Home open, ONLY fetch critical first-viewport data (Hero + Recently Added).
+  // Below-the-fold sections (Trending, Evergreen/Recommended, Upgraded, Years, Movies, Series) load
+  // progressively via IntersectionObserver as the user approaches them.
   const fetchDiscoveryData = useCallback(() => {
     const seq = ++discoverySeqRef.current;
+    fetchedSectionsRef.current = new Set<SectionKey>(['recentlyAdded']);
     setError(null);
-    void Promise.allSettled([
-      fetchRecentlyAddedSection(seq),
-      fetchTrendingSection(seq),
-      fetchEvergreenOrRecommendedSection(seq),
-      fetchRecentlyUpgradedSection(seq),
-      fetchYearsSection(seq),
-      fetchMoviesSection(seq),
-      fetchSeriesSection(seq),
-    ]);
-  }, [
-    fetchRecentlyAddedSection,
-    fetchTrendingSection,
-    fetchEvergreenOrRecommendedSection,
-    fetchRecentlyUpgradedSection,
-    fetchYearsSection,
-    fetchMoviesSection,
-    fetchSeriesSection,
-  ]);
+    setDiscoveryWave(seq);
+    void fetchRecentlyAddedSection(seq);
+  }, [fetchRecentlyAddedSection]);
+
+  // Priority 2: Lazy-trigger below-the-fold sections exactly once per discovery wave when approaching viewport
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0) return;
+    if (trendingLazy.isTriggered && !fetchedSectionsRef.current.has('trending')) {
+      fetchedSectionsRef.current.add('trending');
+      void fetchTrendingSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, trendingLazy.isTriggered, fetchTrendingSection]);
+
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0) return;
+    if (evergreenLazy.isTriggered && !fetchedSectionsRef.current.has('evergreen')) {
+      fetchedSectionsRef.current.add('evergreen');
+      void fetchEvergreenOrRecommendedSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, username, evergreenLazy.isTriggered, fetchEvergreenOrRecommendedSection]);
+
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0 || !preferences.recently_upgraded_enabled) return;
+    if (upgradedLazy.isTriggered && !fetchedSectionsRef.current.has('recentlyUpgraded')) {
+      fetchedSectionsRef.current.add('recentlyUpgraded');
+      void fetchRecentlyUpgradedSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, preferences.recently_upgraded_enabled, upgradedLazy.isTriggered, fetchRecentlyUpgradedSection]);
+
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0) return;
+    if (yearsLazy.isTriggered && !fetchedSectionsRef.current.has('years')) {
+      fetchedSectionsRef.current.add('years');
+      void fetchYearsSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, yearsLazy.isTriggered, fetchYearsSection]);
+
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0) return;
+    if (moviesLazy.isTriggered && !fetchedSectionsRef.current.has('movies')) {
+      fetchedSectionsRef.current.add('movies');
+      void fetchMoviesSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, moviesLazy.isTriggered, fetchMoviesSection]);
+
+  useEffect(() => {
+    if (!isDiscoveryActive || discoveryWave === 0) return;
+    if (seriesLazy.isTriggered && !fetchedSectionsRef.current.has('series')) {
+      fetchedSectionsRef.current.add('series');
+      void fetchSeriesSection(discoverySeqRef.current);
+    }
+  }, [isDiscoveryActive, discoveryWave, seriesLazy.isTriggered, fetchSeriesSection]);
 
   // Fetch filtered catalogue grid
   const fetchFilteredGrid = useCallback(
@@ -498,7 +585,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       fetchFilteredGrid(1, false);
     } else if (viewMode === 'grid') {
       fetchFilteredGrid(1, false);
-    } else {
+    } else if (discoverySeqRef.current === 0) {
       fetchDiscoveryData();
     }
   }, [activeCategory, isFilteredCategory, viewMode, fetchDiscoveryData, fetchFilteredGrid]);
@@ -660,13 +747,25 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   return (
     <div className="home-page-container">
-      {/* Featured Rotating Hero Section (Full-bleed spotlight) */}
-      {heroItems.length > 0 && viewMode === 'discovery' && (
-        <FeaturedHero
-          items={heroItems}
-          onPlay={handlePlay}
-          onMyList={handleMyList}
-        />
+      {/* Featured Rotating Hero Section (Priority 0 immediate shell skeleton -> Priority 1 spotlight) */}
+      {viewMode === 'discovery' && !isFilteredCategory && (
+        heroItems.length > 0 ? (
+          <FeaturedHero
+            items={heroItems}
+            onPlay={handlePlay}
+            onMyList={handleMyList}
+          />
+        ) : sectionLoading.recentlyAdded ? (
+          <section className="hero-fullbleed hero-skeleton" aria-label="Loading Featured Spotlight" aria-busy="true">
+            <div className="hero-inner-container">
+              <div className="hero-skeleton-lines">
+                <div className="hero-skeleton-pill" />
+                <div className="hero-skeleton-title" />
+                <div className="hero-skeleton-desc" />
+              </div>
+            </div>
+          </section>
+        ) : null
       )}
 
       {/* Main Home Content Container */}
@@ -701,87 +800,101 @@ export const HomePage: React.FC<HomePageProps> = ({
               />
             )}
 
-            {/* Section 3: Trending Now */}
-            {(sectionLoading.trending || Boolean(sectionError.trending) || trendingItems.length > 0) && (
-              <DiscoveryRow
-                id="section-trending-now"
-                title="Trending Now"
-                icon={<Flame size={18} strokeWidth={2} />}
-                items={trendingItems}
-                loading={sectionLoading.trending}
-                error={sectionError.trending}
-                onRetry={() => void fetchTrendingSection(discoverySeqRef.current)}
-                onSelectMovie={handleCardClick}
-              />
+            {/* Section 3: Trending Now (Priority 2 — lazy-loaded on viewport approach) */}
+            <div ref={trendingLazy.ref} data-lazy-section="trending">
+              {(!sectionLoaded.trending || sectionLoading.trending || Boolean(sectionError.trending) || trendingItems.length > 0) && (
+                <DiscoveryRow
+                  id="section-trending-now"
+                  title="Trending Now"
+                  icon={<Flame size={18} strokeWidth={2} />}
+                  items={trendingItems}
+                  loading={!trendingLazy.isTriggered || sectionLoading.trending}
+                  error={sectionError.trending}
+                  onRetry={() => void fetchTrendingSection(discoverySeqRef.current)}
+                  onSelectMovie={handleCardClick}
+                />
+              )}
+            </div>
+
+            {/* Section 4: Evergreen Picks / Recommended for You (Priority 2 — lazy-loaded on viewport approach) */}
+            <div ref={evergreenLazy.ref} data-lazy-section="evergreen">
+              {(!sectionLoaded.evergreen || sectionLoading.evergreen || Boolean(sectionError.evergreen) || recommendedItems.length > 0) && (
+                <DiscoveryRow
+                  id="section-recommended-for-you"
+                  title={recommendedPersonalized ? 'Recommended for You' : 'Evergreen Picks'}
+                  icon={<ThumbsUp size={18} strokeWidth={2} />}
+                  items={recommendedItems}
+                  loading={!evergreenLazy.isTriggered || sectionLoading.evergreen}
+                  error={sectionError.evergreen}
+                  onRetry={() => void fetchEvergreenOrRecommendedSection(discoverySeqRef.current)}
+                  onSelectMovie={handleCardClick}
+                />
+              )}
+            </div>
+
+            {/* Recently Upgraded (Priority 2 — lazy-loaded, only shown when verified upgrades exist) */}
+            {preferences.recently_upgraded_enabled && (
+              <div ref={upgradedLazy.ref} data-lazy-section="recently-upgraded">
+                {recentlyUpgradedItems.length > 0 && (
+                  <DiscoveryRow
+                    id="section-recently-upgraded"
+                    title="Recently Upgraded"
+                    icon={<TrendingUp size={18} strokeWidth={2} />}
+                    items={recentlyUpgradedItems}
+                    loading={sectionLoading.recentlyUpgraded}
+                    error={sectionError.recentlyUpgraded}
+                    onRetry={() => void fetchRecentlyUpgradedSection(discoverySeqRef.current)}
+                    onSelectMovie={handleCardClick}
+                    onSeeAll={handleSeeAllRecentlyUpgraded}
+                    isUpgradeRow={true}
+                    emptyMessage="No quality upgrades recorded within the last 3 months."
+                  />
+                )}
+              </div>
             )}
 
-            {/* Section 4: Evergreen Picks (or Recommended for You when server-side activity qualifies) */}
-            {(sectionLoading.evergreen || Boolean(sectionError.evergreen) || recommendedItems.length > 0) && (
-              <DiscoveryRow
-                id="section-recommended-for-you"
-                title={recommendedPersonalized ? 'Recommended for You' : 'Evergreen Picks'}
-                icon={<ThumbsUp size={18} strokeWidth={2} />}
-                items={recommendedItems}
-                loading={sectionLoading.evergreen}
-                error={sectionError.evergreen}
-                onRetry={() => void fetchEvergreenOrRecommendedSection(discoverySeqRef.current)}
-                onSelectMovie={handleCardClick}
+            {/* Section 4b: Browse by Year (Priority 2 — lazy-loaded on viewport approach) */}
+            <div ref={yearsLazy.ref} data-lazy-section="years">
+              <BrowseByYear
+                years={catalogYears}
+                olderCount={olderYearsCount}
+                selectedYear={filters.year}
+                onSelectYear={handleSelectYear}
+                loading={!yearsLazy.isTriggered || sectionLoading.years}
               />
-            )}
+            </div>
 
-            {/* Recently Upgraded (only shown when verified upgrades exist) */}
-            {preferences.recently_upgraded_enabled && recentlyUpgradedItems.length > 0 && (
+            {/* Section 5: All Movies (Priority 2 — lazy-loaded on viewport approach) */}
+            <div ref={moviesLazy.ref} data-lazy-section="movies">
               <DiscoveryRow
-                id="section-recently-upgraded"
-                title="Recently Upgraded"
-                icon={<TrendingUp size={18} strokeWidth={2} />}
-                items={recentlyUpgradedItems}
-                loading={sectionLoading.recentlyUpgraded}
-                error={sectionError.recentlyUpgraded}
-                onRetry={() => void fetchRecentlyUpgradedSection(discoverySeqRef.current)}
+                id="section-all-movies"
+                title="Feature Films & Movies"
+                icon={<Film size={18} strokeWidth={2} />}
+                items={allMoviesPreview}
+                loading={!moviesLazy.isTriggered || sectionLoading.movies}
+                error={sectionError.movies}
+                onRetry={() => void fetchMoviesSection(discoverySeqRef.current)}
                 onSelectMovie={handleCardClick}
-                onSeeAll={handleSeeAllRecentlyUpgraded}
-                isUpgradeRow={true}
-                emptyMessage="No quality upgrades recorded within the last 3 months."
+                onSeeAll={handleSeeAllMovies}
+                seeAllLabel="Explore All Movies"
               />
-            )}
+            </div>
 
-            {/* Section 4b: Browse by Year */}
-            <BrowseByYear
-              years={catalogYears}
-              olderCount={olderYearsCount}
-              selectedYear={filters.year}
-              onSelectYear={handleSelectYear}
-              loading={sectionLoading.years}
-            />
-
-            {/* Section 5: All Movies */}
-            <DiscoveryRow
-              id="section-all-movies"
-              title="Feature Films & Movies"
-              icon={<Film size={18} strokeWidth={2} />}
-              items={allMoviesPreview}
-              loading={sectionLoading.movies}
-              error={sectionError.movies}
-              onRetry={() => void fetchMoviesSection(discoverySeqRef.current)}
-              onSelectMovie={handleCardClick}
-              onSeeAll={handleSeeAllMovies}
-              seeAllLabel="Explore All Movies"
-            />
-
-            {/* Section 6: All Series */}
-            <DiscoveryRow
-              id="section-all-series"
-              title="Web Series & Television"
-              icon={<Tv size={18} strokeWidth={2} />}
-              items={allSeriesPreview}
-              loading={sectionLoading.series}
-              error={sectionError.series}
-              onRetry={() => void fetchSeriesSection(discoverySeqRef.current)}
-              onSelectMovie={handleCardClick}
-              onSeeAll={handleSeeAllSeries}
-              seeAllLabel="Explore All Series"
-            />
+            {/* Section 6: All Series (Priority 2 — lazy-loaded on viewport approach) */}
+            <div ref={seriesLazy.ref} data-lazy-section="series">
+              <DiscoveryRow
+                id="section-all-series"
+                title="Web Series & Television"
+                icon={<Tv size={18} strokeWidth={2} />}
+                items={allSeriesPreview}
+                loading={!seriesLazy.isTriggered || sectionLoading.series}
+                error={sectionError.series}
+                onRetry={() => void fetchSeriesSection(discoverySeqRef.current)}
+                onSelectMovie={handleCardClick}
+                onSeeAll={handleSeeAllSeries}
+                seeAllLabel="Explore All Series"
+              />
+            </div>
           </>
         ) : (
           /* VIEW MODE 2: FILTERED CATALOGUE GRID */
