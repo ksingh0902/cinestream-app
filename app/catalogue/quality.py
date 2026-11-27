@@ -7,12 +7,15 @@ QUALITY_RANK = {
     # Tier 0-9: Camera / Screener / Pre-release
     "cam": 0,
     "camrip": 0,
+    "cinema": 0,
     "hdcam": 1,
     "ts": 2,
     "telesync": 2,
     "hdts": 3,
     "tc": 4,
     "telecine": 4,
+    "predvd": 4,
+    "pre-dvd": 4,
     "scr": 5,
     "screener": 5,
     "dvdscr": 5,
@@ -20,11 +23,13 @@ QUALITY_RANK = {
     "sd": 10,
     "dvd": 11,
     "dvdrip": 12,
-    # Tier 20-29: High Definition 720p
+    # Tier 20-29: High Definition 720p / HDRip / WEB
     "hd": 20,
     "hdtv": 21,
     "720p": 22,
     "720": 22,
+    "hdrip": 25,
+    "web": 29,
     # Tier 30-39: Full High Definition / WEB-DL / 1080p
     "webrip": 30,
     "web-dl": 31,
@@ -45,12 +50,15 @@ QUALITY_RANK = {
 CANONICAL_DISPLAY = {
     "cam": "CAM",
     "camrip": "CAM",
+    "cinema": "Cinema",
     "hdcam": "HDCAM",
     "ts": "TS",
     "telesync": "TS",
     "hdts": "HDTS",
     "tc": "TC",
     "telecine": "TC",
+    "predvd": "PreDVD",
+    "pre-dvd": "PreDVD",
     "scr": "SCR",
     "screener": "SCR",
     "dvdscr": "DVDSCR",
@@ -61,6 +69,8 @@ CANONICAL_DISPLAY = {
     "hdtv": "HDTV",
     "720p": "720p",
     "720": "720p",
+    "hdrip": "HDRip",
+    "web": "WEB",
     "webrip": "WEBRip",
     "web-dl": "WEB-DL",
     "webdl": "WEB-DL",
@@ -81,6 +91,16 @@ NON_QUALITY_DESCRIPTORS = {
     "south", "bollywood", "hollywood", "org", "clean"
 }
 
+_ORDERED_QUALITY_TAGS = (
+    "2160p", "4k", "uhd",
+    "bluray", "bdrip", "brrip",
+    "1080p", "fhd", "web-dl", "webdl", "webrip", "web",
+    "hdrip", "720p", "hdtv",
+    "hdcam", "hdts", "pre-dvd", "predvd", "dvdscr", "telesync", "camrip", "cinema",
+    "dvdrip", "screener", "telecine",
+    "cam", "ts", "tc", "scr", "dvd", "sd", "hd",
+)
+
 
 def parse_quality_tier(raw: Optional[str]) -> Tuple[Optional[int], Optional[str]]:
     """
@@ -89,8 +109,9 @@ def parse_quality_tier(raw: Optional[str]) -> Tuple[Optional[int], Optional[str]
     """
     if not raw:
         return None, None
-    clean = re.sub(r"[^\w\s-]", "", raw).strip().lower()
-    if clean in NON_QUALITY_DESCRIPTORS:
+    clean = re.sub(r"[^\w\s-]", " ", raw).strip().lower()
+    clean = re.sub(r"\s+", " ", clean)
+    if not clean or clean in NON_QUALITY_DESCRIPTORS:
         return None, None
 
     # Exact match first
@@ -98,11 +119,32 @@ def parse_quality_tier(raw: Optional[str]) -> Tuple[Optional[int], Optional[str]
         return QUALITY_RANK[clean], CANONICAL_DISPLAY[clean]
 
     # Substring search for canonical tags in descending order of specificity
-    for tag in ("2160p", "4k", "1080p", "web-dl", "webdl", "webrip", "bluray", "bdrip", "brrip", "720p", "hdcam", "hdts", "dvdscr", "telesync", "camrip", "hdtv", "dvdrip", "cam", "ts", "tc", "scr", "dvd", "sd", "hd"):
+    for tag in _ORDERED_QUALITY_TAGS:
         if re.search(rf"\b{re.escape(tag)}\b", clean):
             return QUALITY_RANK[tag], CANONICAL_DISPLAY[tag]
 
     return None, None
+
+
+def extract_print_quality(*texts: Optional[str]) -> Optional[str]:
+    """
+    Extract the first valid canonical print-quality display token from one or more strings
+    (e.g. detail print_quality, quality field, title/tags). Ignores language descriptors like 'HINDI'.
+    """
+    for txt in texts:
+        tier, disp = parse_quality_tier(txt)
+        if tier is not None and disp is not None:
+            return disp
+    return None
+
+
+def is_quality_downgrade(old_quality: Optional[str], new_quality: Optional[str]) -> bool:
+    """Return True only when both old and new qualities are valid tiers and new_tier < old_tier."""
+    old_tier, _ = parse_quality_tier(old_quality)
+    new_tier, _ = parse_quality_tier(new_quality)
+    if old_tier is None or new_tier is None:
+        return False
+    return new_tier < old_tier
 
 
 def is_quality_upgrade(old_quality: Optional[str], new_quality: Optional[str]) -> Tuple[bool, Optional[str]]:

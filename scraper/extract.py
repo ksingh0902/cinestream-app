@@ -1,12 +1,14 @@
 """HTML -> dicts. Stores ABSOLUTE embed URLs so host changes are free (R3)."""
 from __future__ import annotations
 
+import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.catalogue.quality import extract_print_quality
 from config import SITE_MIRRORS
 
 # captures host + code of any embed player, whatever domain it lives on
@@ -228,6 +230,53 @@ def parse_detail(html: str, url: str) -> Dict:
             "server": _t(a.select_one(".serv_tit")) or None,
             "language": _t(a.select_one(".lang_tit")) or None,
         })
+
+    # Extract optional YoMovies version/date evidence safely (never fragile if absent)
+    mod_meta = soup.select_one("meta[property='article:modified_time'], meta[name='article:modified_time']")
+    if mod_meta and mod_meta.get("content"):
+        info["article_modified_time"] = str(mod_meta["content"]).strip()
+
+    pub_meta = soup.select_one("meta[property='article:published_time'], meta[name='article:published_time']")
+    if pub_meta and pub_meta.get("content"):
+        info["article_published_time"] = str(pub_meta["content"]).strip()
+
+    jsonld_modified: Optional[str] = None
+    for script_tag in soup.select("script[type='application/ld+json']"):
+        raw_ld = (script_tag.string or script_tag.get_text() or "").strip()
+        if not raw_ld:
+            continue
+        try:
+            parsed_ld = json.loads(raw_ld)
+        except Exception:
+            continue
+        nodes = parsed_ld if isinstance(parsed_ld, list) else [parsed_ld]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            graph = node.get("@graph")
+            sub_nodes = graph if isinstance(graph, list) else [node]
+            for sub in sub_nodes:
+                if isinstance(sub, dict) and sub.get("dateModified"):
+                    jsonld_modified = str(sub["dateModified"]).strip()
+                    break
+            if jsonld_modified:
+                break
+        if jsonld_modified:
+            break
+    if jsonld_modified:
+        info["jsonld_date_modified"] = jsonld_modified
+
+    # Extract genuine print-quality evidence from quality field, title, and page tags
+    # (explicitly ignores language descriptors like 'HINDI' and never trusts download server 'HD')
+    tag_texts = [_t(t) for t in soup.select("a[rel='tag'], .mvic-info .quality, .mli-quality")]
+    detected_print_quality = extract_print_quality(
+        info.get("quality"),
+        info.get("title"),
+        *tag_texts,
+    )
+    if detected_print_quality:
+        info["print_quality"] = detected_print_quality
+
     return info
 
 
