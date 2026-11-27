@@ -11,24 +11,28 @@ Use this skill whenever the user invokes `/crawler`, asks to crawl/scrape movies
 ## Supported Content Sources
 1. **YoMovies** (`https://yomovies.com.im`): Latest Bollywood, Hollywood, Dual Audio, Web Series, OTT releases.
 2. **PRMovies** (`https://prmovies.ventures`): High-definition Hindi dubbed, regional South Indian, and featured titles.
-3. **Ask4Movies** (`https://fbox.gd` / `https://ask4movietv.cyou`): Global movies, trending TV series, and top IMDb collections.
-4. **Movies7** (`https://movies7to.net`): Hollywood releases with TMDB metadata enrichment and cross-source duplicate prevention.
-5. **DuoFlix** (`cluster.watchkar.com` / `dooflix.app`): Direct streaming catalogue feeds and episode structures.
+3. **MoviesDrive** (`https://new5.moviesdrive.cyou` / `https://moviesdrives.bid`): Priority fallback right after YoMovies — Hindi, Dual Audio, Bollywood, Hollywood, and OTT Web Series with IMDb IDs & print quality badges.
+4. **Ask4Movies** (`https://fbox.gd` / `https://ask4movietv.cyou`): Global movies, trending TV series, and top IMDb collections.
+5. **Movies7** (`https://movies7to.net`): Hollywood releases with TMDB metadata enrichment and cross-source duplicate prevention.
+6. **DuoFlix** (`cluster.watchkar.com` / `dooflix.app`): Direct streaming catalogue feeds and episode structures.
+7. **FlixMovie** (`https://flixmovie.cc/home`): Movies, TV shows, and Top IMDb collections with TMDb metadata enrichment and cross-source deduplication.
 
 ---
 
 ## Command Routing & Execution
 
-Execute the unified CLI runner [sync_latest.py](file:///c:/Users/Singh/Downloads/new-me/sync_latest.py) via `run_command`:
+Execute the unified CLI runner [sync_latest.py](file:///c:/Users/Singh/Downloads/new-me-cinemy-react/sync_latest.py) via `run_command`:
 
 | User Command | Action & Command Line |
 | :--- | :--- |
 | `/crawler` or `/crawler all` | `python sync_latest.py --source all` |
 | `/crawler yomovies` | `python sync_latest.py --source yomovies` |
 | `/crawler prmovies` | `python sync_latest.py --source prmovies` |
+| `/crawler moviesdrive` | `python sync_latest.py --source moviesdrive` |
 | `/crawler ask4movies` | `python sync_latest.py --source ask4movie` |
 | `/crawler movies7` | `python sync_latest.py --source movies7` |
 | `/crawler duoflix` | `python sync_latest.py --source duoflix` |
+| `/crawler flixmovie` | `python sync_latest.py --source flixmovie` |
 | `/crawler report` | `python sync_latest.py --report-only` |
 
 ---
@@ -67,6 +71,7 @@ After running the crawl:
 | **Ask4Movies** | {count} | {added} | {updated} | {skipped} |
 | **Movies7** | {count} | {added} | {updated} | {skipped} |
 | **DuoFlix** | {count} | {added} | {updated} | {skipped} |
+| **FlixMovie** | {count} | {added} | {updated} | {skipped} |
 | **TOTAL** | **{total}** | **{total_added}** | **{total_refreshed}** | **{total_skipped}** |
 
 * **Total Database Catalogue**: {total_count} titles (+{newly_added} newly added)

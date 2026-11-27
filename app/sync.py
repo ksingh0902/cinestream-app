@@ -35,6 +35,8 @@ from app.adapters.ask4movie.http import get as a4m_get
 from app.adapters.ask4movie.sync import upsert as a4m_upsert
 from app.adapters.movies7.sync import sync_movies7
 from app.adapters.dooflix.sync import sync_dooflix
+from app.adapters.flixmovie.sync import sync_flixmovie
+from app.adapters.moviesdrive.sync import sync_moviesdrive
 
 logger = logging.getLogger("cinemymovies.sync")
 
@@ -925,8 +927,8 @@ def sync_ask4movie(base_time: int) -> Dict[str, int]:
     return {"added": added, "updated": updated, "total": len(items)}
 
 
-def run_full_sync() -> Dict[str, Any]:
-    """Run full catalog sync across both sources."""
+def run_full_sync(*, notifier: Any = None) -> Dict[str, Any]:
+    """Run full catalog sync across all configured sources and emit one best-effort SyncRunReport."""
     global _LAST_SYNC_META
     _LAST_SYNC_META["status"] = "running"
     start_time = time.time()
@@ -936,23 +938,94 @@ def run_full_sync() -> Dict[str, Any]:
     print("[SYNC] CineMyMovies Automated Catalog Sync Started")
     print("=" * 60)
 
-    ym_res = sync_yomovies(base_time)
-    a4m_res = sync_ask4movie(base_time)
-    m7_res = sync_movies7(pages_per_category=5)
-    df_res = sync_dooflix(base_time)
+    from app.notifications import (
+        TelegramNotifier,
+        build_sync_run_report,
+        source_report_from_dict,
+    )
 
+    source_reports = []
+
+    def _run_source(label: str, fn) -> Dict[str, Any]:
+        s_start = int(time.time())
+        try:
+            res_dict = fn() or {}
+            source_reports.append(
+                source_report_from_dict(label, res_dict, started_at=s_start, finished_at=int(time.time()))
+            )
+            return res_dict
+        except Exception as exc:
+            logger.exception("[SYNC] Source %s failed: %s", label, exc)
+            source_reports.append(
+                source_report_from_dict(label, None, started_at=s_start, finished_at=int(time.time()), exception=exc)
+            )
+            return {"status": "failed", "added": 0, "updated": 0, "skipped": 0, "total": 0, "errors": 1}
+
+    from app.adapters.registry import ADAPTERS
+
+    _SOURCE_LABELS = {
+        "yomovies": "YoMovies",
+        "moviesdrive": "MoviesDrive",
+        "ask4movie": "Ask4Movies",
+        "movies7": "Movies7",
+        "dooflix": "DuoFlix",
+        "flixmovie": "FlixMovie",
+    }
+    _SYNC_HANDLERS = {
+        "yomovies": lambda: sync_yomovies(base_time),
+        "moviesdrive": lambda: sync_moviesdrive(base_time, pages_per_mirror=3),
+        "ask4movie": lambda: sync_ask4movie(base_time),
+        "movies7": lambda: sync_movies7(pages_per_category=5),
+        "dooflix": lambda: sync_dooflix(base_time),
+        "flixmovie": lambda: sync_flixmovie(base_time, pages_per_category=2),
+    }
+
+    # Drive execution & reporting dynamically from every registered adapter in ADAPTERS
+    results_by_key: Dict[str, Dict[str, Any]] = {}
+    for key in ADAPTERS.keys():
+        label = _SOURCE_LABELS.get(key, key.title())
+        handler = _SYNC_HANDLERS.get(key)
+        if handler is None:
+            source_reports.append(
+                source_report_from_dict(
+                    label,
+                    {"status": "warning", "added": 0, "updated": 0, "skipped": 0, "total": 0, "warnings": [f"{label} has no sync handler configured"]},
+                )
+            )
+            results_by_key[key] = {"added": 0, "updated": 0, "skipped": 0, "total": 0}
+            continue
+        results_by_key[key] = _run_source(label, handler)
+
+    # Read final catalogue total (read-only) for the Telegram summary
+    catalogue_total: Optional[int] = None
+    try:
+        db_paths = get_target_db_paths()
+        if db_paths and os.path.exists(db_paths[0]):
+            with sqlite3.connect(db_paths[0], timeout=5) as _c:
+                catalogue_total = int(_c.execute("SELECT COUNT(*) FROM movies").fetchone()[0])
+    except Exception:
+        pass
+
+    finished_ts = int(time.time())
     duration = round(time.time() - start_time, 2)
+    run_report = build_sync_run_report(
+        source_reports,
+        started_at=base_time,
+        finished_at=finished_ts,
+        catalogue_total=catalogue_total,
+    )
+
     summary = {
         "status": "success",
+        "overall_status": run_report.overall_status.value,
         "duration_seconds": duration,
         "timestamp": base_time,
-        "yomovies": ym_res,
-        "ask4movie": a4m_res,
-        "movies7": m7_res,
-        "dooflix": df_res,
-        "total_added": ym_res.get("added", 0) + a4m_res.get("added", 0) + m7_res.get("added", 0) + df_res.get("added", 0),
-        "total_refreshed": ym_res.get("updated", 0) + a4m_res.get("updated", 0) + m7_res.get("updated", 0) + df_res.get("updated", 0),
-        "total_skipped": ym_res.get("skipped", 0) + a4m_res.get("skipped", 0) + m7_res.get("skipped", 0) + df_res.get("skipped", 0),
+        **results_by_key,
+        "total_added": sum(int(r.get("added", 0) or 0) for r in results_by_key.values()),
+        "total_refreshed": sum(int(r.get("updated", 0) or 0) for r in results_by_key.values()),
+        "total_skipped": sum(int(r.get("skipped", 0) or 0) for r in results_by_key.values()),
+        "catalogue_total": catalogue_total,
+        "report": run_report,
     }
 
     _LAST_SYNC_META["last_run"] = base_time
@@ -969,6 +1042,27 @@ def run_full_sync() -> Dict[str, Any]:
         prewarm_catalog_cache()
     except Exception as exc:
         print(f"[SYNC] Note: catalog cache invalidation skipped: {exc}", flush=True)
+
+    # Best-effort single final notifications (Telegram & ntfy; never fail the sync)
+    try:
+        active_notifier = notifier if notifier is not None else TelegramNotifier.from_env()
+        notify_res = active_notifier.send_sync_report(run_report)
+        if notify_res.sent:
+            print(f"[SYNC] Telegram notification sent ({notify_res.messages_sent} message(s)).", flush=True)
+        elif not notify_res.skipped:
+            print(f"[SYNC] Note: {notify_res.reason}", flush=True)
+    except Exception as exc:
+        print(f"[SYNC] Note: Telegram notification skipped due to error: {type(exc).__name__}", flush=True)
+
+    try:
+        from app.notifications import NtfyNotifier
+        ntfy_res = NtfyNotifier.from_env().send_sync_report(run_report)
+        if ntfy_res.sent:
+            print(f"[SYNC] ntfy notification sent ({ntfy_res.messages_sent} message(s)).", flush=True)
+        elif not ntfy_res.skipped:
+            print(f"[SYNC] Note: {ntfy_res.reason}", flush=True)
+    except Exception as exc:
+        print(f"[SYNC] Note: ntfy notification skipped due to error: {type(exc).__name__}", flush=True)
 
     return summary
 
