@@ -211,3 +211,38 @@ export function resolvePosterFallback(params: {
   posterResolveSessionCache.set(cacheKey, req);
   return req;
 }
+
+const backdropResolveSessionCache = new Map<string, Promise<string | null>>();
+
+/**
+ * Bounded, session-cached widescreen HD backdrop resolver (GET /api/backdrop/resolve).
+ * Used by FeaturedHero to display crisp 16:9 w1280 artwork instead of stretched portrait posters.
+ */
+export function resolveBackdrop(params: {
+  title: string;
+  year?: string | null;
+  is_series?: boolean | number;
+  tmdb_id?: string | number | null;
+}): Promise<string | null> {
+  const title = (params.title || '').trim();
+  const tmdbId = params.tmdb_id != null ? String(params.tmdb_id).trim() : '';
+  if (!title && !tmdbId) return Promise.resolve(null);
+  const year = (params.year || '').trim();
+  const isSeries = params.is_series ? 1 : 0;
+  const cacheKey = `${title.toLowerCase()}|${year}|${isSeries}|${tmdbId}`;
+
+  const existing = backdropResolveSessionCache.get(cacheKey);
+  if (existing) return existing;
+
+  const query = new URLSearchParams({ title, is_series: String(isSeries) });
+  if (year) query.set('year', year);
+  if (tmdbId) query.set('tmdb_id', tmdbId);
+
+  const req = apiClient
+    .get<{ backdrop_url: string | null; source: string }>(`/api/backdrop/resolve?${query.toString()}`)
+    .then((res) => (res && typeof res.backdrop_url === 'string' && res.backdrop_url.trim() ? res.backdrop_url.trim() : null))
+    .catch(() => null);
+
+  backdropResolveSessionCache.set(cacheKey, req);
+  return req;
+}

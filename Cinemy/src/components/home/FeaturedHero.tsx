@@ -13,7 +13,21 @@ import {
 } from 'lucide-react';
 import { MovieItem } from '../../types/catalogue';
 import { getPosterUrl, formatRating } from '../../utils/formatters';
+import { resolveBackdrop } from '../../api/catalogue';
 import { useWatchlist } from '../../features/watchlist';
+
+function upgradeBackdropResolution(url: string): string {
+  if (!url || url.startsWith('data:')) return url;
+  // Upgrade low-res TMDB thumbnails (e.g. w185/w300/w342/w400/w500/w780) to crisp w1280 for full-bleed hero display
+  if (url.includes('image.tmdb.org/t/p/')) {
+    return url.replace(/\/t\/p\/w\d+\//i, '/t/p/w1280/');
+  }
+  // Upgrade resized Amazon/IMDb thumbnails to high-res widescreen width
+  if (url.includes('m.media-amazon.com') && /\._V1_[^.]+\.jpg$/i.test(url)) {
+    return url.replace(/\._V1_[^.]+\.jpg$/i, '._V1_QL85_UX1280_.jpg');
+  }
+  return url;
+}
 
 interface FeaturedHeroProps {
   items: MovieItem[];
@@ -26,10 +40,35 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [isFading, setIsFading] = useState(false);
+  const [resolvedBackdrops, setResolvedBackdrops] = useState<Record<number, string>>({});
 
   const timerRef = useRef<number | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const totalItems = items.length;
+
+  // Pre-resolve crisp 16:9 widescreen backdrops for featured hero slides (non-blocking, session-cached)
+  useEffect(() => {
+    if (totalItems === 0) return;
+    let cancelled = false;
+
+    items.forEach((item) => {
+      if ((item as any).backdrop || (item as any).backdrop_url) return;
+      void resolveBackdrop({
+        title: item.title,
+        year: item.year,
+        is_series: item.is_series,
+        tmdb_id: (item as any).tmdb_id,
+      }).then((url) => {
+        if (!cancelled && url) {
+          setResolvedBackdrops((prev) => (prev[item.id] === url ? prev : { ...prev, [item.id]: url }));
+        }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, totalItems]);
 
   const goToNext = useCallback(() => {
     if (totalItems <= 1) return;
@@ -150,8 +189,12 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
   const current = items[currentIndex];
   const posterUrl = getPosterUrl(current.poster || current.poster_url, current.title, current.year);
 
-  // Use verified backdrop image if available, falling back to rich ambient poster artwork
-  const backdropUrl = (current as any).backdrop || (current as any).backdrop_url || posterUrl;
+  // Prefer verified 16:9 widescreen backdrop (from item or cached TMDb lookup), falling back to upgraded HD poster
+  const backdropUrl =
+    (current as any).backdrop ||
+    (current as any).backdrop_url ||
+    resolvedBackdrops[current.id] ||
+    upgradeBackdropResolution(posterUrl);
 
   const rating = formatRating(current.rating, current.imdb);
   const isSeries = Boolean(current.is_series);
@@ -174,11 +217,14 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({ items, onPlay, onMyL
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchCancel}
     >
-      {/* Full-Bleed Backdrop Layer with very slow zoom effect */}
+      {/* Full-Bleed Crisp Widescreen Backdrop Layer with very slow zoom effect */}
       <div className="hero-backdrop-stage" aria-hidden="true">
-        <div
+        <img
           className={`hero-backdrop-img ken-burns ${isFading ? 'fading' : ''}`}
-          style={{ backgroundImage: `url(${backdropUrl})` }}
+          src={backdropUrl}
+          alt=""
+          loading="eager"
+          decoding="async"
         />
       </div>
 

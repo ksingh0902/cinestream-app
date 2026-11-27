@@ -77,6 +77,7 @@ vi.mock('../../../api/catalogue', () => ({
   getMovies: (...args: any[]) => mockGetMovies(...args),
   getHomepagePreferences: (...args: any[]) => mockGetHomepagePreferences(...args),
   resolvePosterFallback: vi.fn().mockResolvedValue(null),
+  resolveBackdrop: vi.fn().mockResolvedValue(null),
 }));
 
 beforeEach(() => {

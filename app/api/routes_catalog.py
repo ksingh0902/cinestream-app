@@ -63,6 +63,11 @@ _poster_resolve_lock = threading.Lock()
 _POSTER_RESOLVE_TTL = 86400.0
 _POSTER_RESOLVE_MAX = 2048
 
+_backdrop_resolve_cache: dict[tuple[str, str, int, str], tuple[float, Optional[str], str]] = {}
+_backdrop_resolve_lock = threading.Lock()
+_BACKDROP_RESOLVE_TTL = 86400.0
+_BACKDROP_RESOLVE_MAX = 512
+
 
 def _get_canonical_source_counts() -> dict[tuple[str, int], int]:
     """Cached map of canonical (normalized_title, is_series) -> number of distinct catalogue sources (1..4)."""
@@ -221,6 +226,118 @@ def resolve_poster_fallback(
         _poster_resolve_cache[cache_key] = (now_mono, resolved_url)
 
     return {"poster_url": resolved_url, "source": resolved_src}
+
+
+@router.get("/api/backdrop/resolve")
+def resolve_backdrop(
+    title: str = Query(..., min_length=1, max_length=200),
+    year: Optional[str] = Query(default=None, max_length=10),
+    is_series: int = Query(default=0, ge=0, le=1),
+    tmdb_id: Optional[str] = Query(default=None, max_length=20),
+):
+    """
+    Bounded, cached on-demand widescreen HD backdrop resolver for Hero Spotlight banners.
+    Returns official 16:9 TMDb w1280 backdrops (or HD poster fallback) with 24h in-memory cache.
+    Zero DB writes.
+    """
+    clean_title = _clean_poster_lookup_title(title)
+    clean_tmdb = str(tmdb_id or "").strip()
+    if not clean_tmdb.isdigit():
+        clean_tmdb = ""
+
+    if not clean_title and not clean_tmdb:
+        return {"backdrop_url": None, "source": "none"}
+
+    clean_year = str(year or "").strip()
+    if not (clean_year.isdigit() and len(clean_year) == 4):
+        clean_year = ""
+
+    cache_key = (clean_title.lower(), clean_year, int(is_series), clean_tmdb)
+    now_mono = time.monotonic()
+    with _backdrop_resolve_lock:
+        cached = _backdrop_resolve_cache.get(cache_key)
+        if cached:
+            ttl = _BACKDROP_RESOLVE_TTL if cached[1] else 60.0
+            if now_mono - cached[0] < ttl:
+                return {"backdrop_url": cached[1], "source": "cache" if cached[1] else "none"}
+
+    resolved_url: Optional[str] = None
+    resolved_src = "none"
+    try:
+        import httpx
+        from ..adapters.embed_helper import TMDB_API_KEY
+
+        api_key = os.getenv("TMDB_API_KEY") or TMDB_API_KEY
+        if api_key:
+            media = "tv" if is_series else "movie"
+
+            def _tmdb_get(client: httpx.Client, path: str, params: dict[str, str]):
+                for host in ("https://api.themoviedb.org", "https://api.tmdb.org"):
+                    try:
+                        r = client.get(f"{host}{path}", params=params)
+                        if r.status_code == 200:
+                            return r.json() or {}
+                    except Exception:
+                        continue
+                return {}
+
+            with httpx.Client(timeout=4.0) as client:
+                # 1. Direct TMDb ID lookup when available
+                if clean_tmdb:
+                    data = _tmdb_get(client, f"/3/{media}/{clean_tmdb}", {"api_key": api_key})
+                    bp = data.get("backdrop_path")
+                    pp = data.get("poster_path")
+                    if bp and isinstance(bp, str):
+                        resolved_url = f"https://image.tmdb.org/t/p/w1280{bp}"
+                        resolved_src = "tmdb_backdrop"
+                    elif pp and isinstance(pp, str):
+                        resolved_url = f"https://image.tmdb.org/t/p/original{pp}"
+                        resolved_src = "tmdb_poster_hd"
+
+                # 2. Search TMDb by cleaned title + optional year
+                if not resolved_url and clean_title:
+                    params: dict[str, str] = {"api_key": api_key, "query": clean_title}
+                    if clean_year:
+                        params["first_air_date_year" if is_series else "year"] = clean_year
+
+                    results = _tmdb_get(client, f"/3/search/{media}", params).get("results", [])
+                    if not results and clean_year:
+                        params.pop("first_air_date_year", None)
+                        params.pop("year", None)
+                        results = _tmdb_get(client, f"/3/search/{media}", params).get("results", [])
+                    if not results:
+                        results = _tmdb_get(
+                            client,
+                            "/3/search/multi",
+                            {"api_key": api_key, "query": clean_title},
+                        ).get("results", [])
+
+                    # Prefer a result with a true widescreen backdrop_path
+                    fallback_poster_path: Optional[str] = None
+                    for item in results:
+                        bp = item.get("backdrop_path")
+                        if bp and isinstance(bp, str):
+                            resolved_url = f"https://image.tmdb.org/t/p/w1280{bp}"
+                            resolved_src = "tmdb_backdrop"
+                            break
+                        if not fallback_poster_path:
+                            pp = item.get("poster_path")
+                            if pp and isinstance(pp, str):
+                                fallback_poster_path = pp
+                    if not resolved_url and fallback_poster_path:
+                        resolved_url = f"https://image.tmdb.org/t/p/original{fallback_poster_path}"
+                        resolved_src = "tmdb_poster_hd"
+    except Exception:
+        resolved_url = None
+        resolved_src = "none"
+
+    with _backdrop_resolve_lock:
+        if len(_backdrop_resolve_cache) >= _BACKDROP_RESOLVE_MAX:
+            oldest = min(_backdrop_resolve_cache, key=lambda k: _backdrop_resolve_cache[k][0])
+            _backdrop_resolve_cache.pop(oldest, None)
+        _backdrop_resolve_cache[cache_key] = (now_mono, resolved_url, resolved_src)
+
+    return {"backdrop_url": resolved_url, "source": resolved_src}
 
 
 def _is_valid_poster_url(val: str | None) -> bool:
@@ -1004,6 +1121,30 @@ def recently_added(
 
     prioritized = _apply_recently_added_source_priority(candidates, yomovies_slots=10)
     formatted = prioritized[:limit]
+
+    # Pre-attach crisp 16:9 TMDb w1280 backdrops on the top 6 hero spotlight items (parallel, 24h cached)
+    hero_slice = formatted[:6]
+    if hero_slice:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _attach_backdrop(item: dict) -> None:
+            if item.get("backdrop_url") or item.get("backdrop"):
+                return
+            try:
+                res = resolve_backdrop(
+                    title=str(item.get("title") or ""),
+                    year=str(item.get("year") or "") or None,
+                    is_series=1 if item.get("is_series") else 0,
+                    tmdb_id=str(item.get("tmdb_id") or "") or None,
+                )
+                bd = res.get("backdrop_url") if isinstance(res, dict) else None
+                if bd:
+                    item["backdrop_url"] = bd
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=min(6, len(hero_slice))) as pool:
+            list(pool.map(_attach_backdrop, hero_slice))
 
     return {
         "total": len(formatted),
